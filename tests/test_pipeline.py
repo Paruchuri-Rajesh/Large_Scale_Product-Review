@@ -1,0 +1,98 @@
+"""Smoke tests that exercise the same code paths used in production.
+
+These do not start Spark — Spark is covered by the actual ETL/streaming
+runs. We focus on the bits that fail silently without tests: text cleaning,
+the per-row feature enrichment used for online scoring, and the FastAPI
+endpoints (loaded models off disk, in-process via TestClient).
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from src.common.text import clean_text, sentiment_label_from_rating
+from src.stream.score_stream import _enrich_for_serving
+from src.train.train import NUMERIC_FRAUD_FEATURES
+
+
+def test_clean_text_strips_html_and_urls() -> None:
+    assert (
+        clean_text("Check <b>this</b> https://example.com !!!").strip()
+        == "check this"
+    )
+
+
+@pytest.mark.parametrize(
+    "rating,expected",
+    [(1, 0), (2, 0), (3, 1), (4, 2), (5, 2), (None, 1)],
+)
+def test_sentiment_label_from_rating(rating, expected) -> None:
+    assert sentiment_label_from_rating(rating) == expected
+
+
+def test_enrich_for_serving_has_all_numeric_features() -> None:
+    pdf = pd.DataFrame(
+        [
+            {
+                "review_body": "amazing product, love it!",
+                "review_headline": "great",
+                "star_rating": 5,
+                "helpful_votes": 1,
+                "total_votes": 2,
+                "verified_purchase": True,
+            }
+        ]
+    )
+    out = _enrich_for_serving(pdf)
+    for col in NUMERIC_FRAUD_FEATURES:
+        assert col in out.columns, f"missing serving feature: {col}"
+    assert out.loc[0, "review_body_clean"].startswith("amazing product")
+
+
+def test_predict_endpoint_classifies_signal() -> None:
+    from fastapi.testclient import TestClient
+
+    from src.common.config import FRAUD_MODEL_PATH, SENTIMENT_MODEL_PATH
+
+    if not SENTIMENT_MODEL_PATH.exists() or not FRAUD_MODEL_PATH.exists():
+        pytest.skip("models not trained yet; run `make all`")
+
+    from src.serve.app import app
+
+    client = TestClient(app)
+    r = client.post(
+        "/predict",
+        json={
+            "review_body": "absolutely terrible quality, broke after one day, do not buy",
+            "star_rating": 1,
+            "verified_purchase": True,
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["sentiment"] == "negative"
+
+    r = client.post(
+        "/predict",
+        json={
+            "review_body": "exceeded my expectations, fantastic build quality, highly recommend",
+            "star_rating": 5,
+            "verified_purchase": True,
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["sentiment"] == "positive"
+
+
+def test_healthz() -> None:
+    from fastapi.testclient import TestClient
+
+    from src.serve.app import app
+
+    client = TestClient(app)
+    assert client.get("/healthz").json() == {"status": "ok"}

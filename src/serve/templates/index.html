@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Amazon Reviews — Sentiment & Fraud</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<header>
+  <h1>Amazon Reviews · Sentiment &amp; Fraud</h1>
+  <p class="sub">Spark batch + streaming · MLflow-tracked models · FastAPI service</p>
+</header>
+
+<main>
+  <section class="card">
+    <h2>1. Score a review</h2>
+    <p class="hint">Type any review text. The sentiment model predicts negative/neutral/positive; the fraud model returns a probability.</p>
+    <form id="score-form">
+      <textarea id="body" rows="4" placeholder="e.g. This product completely changed my life, I bought 100 of them, 5 stars all the way!" required></textarea>
+      <div class="row">
+        <label>Star rating
+          <select id="star">
+            <option value="">(none)</option>
+            <option>1</option><option>2</option><option>3</option><option>4</option><option selected>5</option>
+          </select>
+        </label>
+        <label>Verified purchase
+          <select id="verified">
+            <option value="true">true</option>
+            <option value="false">false</option>
+          </select>
+        </label>
+        <button type="submit">Score</button>
+      </div>
+    </form>
+    <pre id="score-out" class="out"></pre>
+  </section>
+
+  <section class="card">
+    <h2>2. Top products (batch ETL)</h2>
+    <p class="hint">Aggregations produced by the Spark batch job (<code>data/processed/product_agg.parquet</code>).</p>
+    <table id="products-table"><thead>
+      <tr><th>Product</th><th>Category</th><th>#reviews</th><th>avg★</th><th>%5★</th><th>fraud rate</th></tr>
+    </thead><tbody></tbody></table>
+  </section>
+
+  <section class="card">
+    <h2>3. Suspicious reviewers</h2>
+    <p class="hint">Reviewers ranked by fraud_rate from the ETL output.</p>
+    <table id="reviewers-table"><thead>
+      <tr><th>Reviewer</th><th>#reviews</th><th>avg★</th><th>fraud rate</th><th>%verified</th></tr>
+    </thead><tbody></tbody></table>
+  </section>
+
+  <section class="card">
+    <h2>4. Streaming feed</h2>
+    <p class="hint">Most recent reviews scored by the Spark Structured Streaming job. Refreshes every 5s.</p>
+    <table id="stream-table"><thead>
+      <tr><th>review_id</th><th>product</th><th>★</th><th>sentiment</th><th>fraud p</th><th>flag</th></tr>
+    </thead><tbody></tbody></table>
+  </section>
+
+  <section class="card">
+    <h2>5. Model metadata</h2>
+    <pre id="meta-out" class="out"></pre>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

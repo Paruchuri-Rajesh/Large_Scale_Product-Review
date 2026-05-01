@@ -1,0 +1,25 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.env
+.pytest_cache/
+.DS_Store
+.claude/
+.deepeval/
+
+# data + model artifacts
+data/raw/*
+data/processed/*
+data/streaming_in/*
+data/streaming_out/*
+models/*.joblib
+models/meta.json
+mlruns/
+
+# keep these dirs in git
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/streaming_in/.gitkeep
+!data/streaming_out/.gitkeep
+!models/.gitkeep
