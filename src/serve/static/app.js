@@ -876,3 +876,117 @@ loadReviewers();
 loadStream();
 loadMeta();
 setInterval(loadStream, 5000);
+
+// ── Section 10: LLM fraud explanation ────────────────────────────────────────
+document.getElementById("llm-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = document.getElementById("llm-body").value.trim();
+  const star = parseInt(document.getElementById("llm-star").value);
+  const resultDiv = document.getElementById("llm-result");
+  const badgesDiv = document.getElementById("llm-badges");
+  const explainDiv = document.getElementById("llm-explanation");
+
+  resultDiv.style.display = "none";
+  explainDiv.innerHTML = '<span class="hint">Calling Ollama llama3.2... this may take 10-20s</span>';
+  resultDiv.style.display = "block";
+
+  try {
+    const data = await postJSON("/predict", { review_body: body, star_rating: star });
+    const ex = data.fraud_explanation || {};
+    const risk = ex.risk_level || "unknown";
+    const riskColor = risk === "high" ? "#c0392b" : risk === "medium" ? "#e67e22" : "#27ae60";
+
+    badgesDiv.innerHTML = `
+      <span class="badge" style="background:${riskColor};color:#fff">Risk: ${risk.toUpperCase()}</span>
+      <span class="badge" style="background:#2c3e50;color:#fff">Sentiment: ${data.sentiment}</span>
+      <span class="badge" style="background:#8e44ad;color:#fff">Fraud prob: ${(data.fraud_proba * 100).toFixed(1)}%</span>
+      <span class="badge" style="background:${data.fraud_flag ? '#c0392b' : '#27ae60'};color:#fff">${data.fraud_flag ? "FLAGGED" : "CLEAN"}</span>
+      ${ex.llm_generated ? '<span class="badge" style="background:#1a6b3a;color:#fff">LLM explanation</span>' : '<span class="badge" style="background:#888;color:#fff">rule-based</span>'}
+    `;
+    explainDiv.innerHTML = `<p style="line-height:1.7;margin-top:12px">${ex.summary || data.fraud_explanation || "No explanation available."}</p>`;
+  } catch (err) {
+    explainDiv.innerHTML = `<span style="color:red">Error: ${err.message}</span>`;
+  }
+});
+
+// ── Section 11: Agentic auditor ───────────────────────────────────────────────
+document.getElementById("audit-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const productId = document.getElementById("audit-product-id").value.trim();
+  const statusDiv = document.getElementById("audit-status");
+  const resultDiv = document.getElementById("audit-result");
+  const reportDiv = document.getElementById("audit-report-text");
+
+  resultDiv.style.display = "none";
+  statusDiv.innerHTML = `Running agentic audit for <strong>${productId}</strong>... this takes 30-60s while the LLM reasons over the data.`;
+
+  try {
+    const data = await getJSON(`/audit/${productId}`);
+    statusDiv.innerHTML = `Audit complete for <strong>${productId}</strong>.`;
+    // Format report: bold section headers, preserve line breaks
+    const formatted = (data.report || "No report generated.")
+      .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\n/g, "<br>");
+    reportDiv.innerHTML = `<div style="line-height:1.8;font-size:14px">${formatted}</div>`;
+    resultDiv.style.display = "block";
+  } catch (err) {
+    statusDiv.innerHTML = `<span style="color:red">Error: ${err.message}</span>`;
+  }
+});
+
+// ── Section 10: LLM fraud explanation ────────────────────────────────────────
+document.getElementById("llm-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = document.getElementById("llm-body").value.trim();
+  const star = parseInt(document.getElementById("llm-star").value);
+  const resultDiv = document.getElementById("llm-result");
+  const badgesDiv = document.getElementById("llm-badges");
+  const explainDiv = document.getElementById("llm-explanation");
+
+  resultDiv.style.display = "none";
+  explainDiv.innerHTML = '<span class="hint">Calling Ollama llama3.2... this may take 10-20s</span>';
+  resultDiv.style.display = "block";
+
+  try {
+    const data = await postJSON("/predict", { review_body: body, star_rating: star });
+    const ex = data.fraud_explanation || {};
+    const risk = ex.risk_level || "unknown";
+    const riskColor = risk === "high" ? "#c0392b" : risk === "medium" ? "#e67e22" : "#27ae60";
+
+    badgesDiv.innerHTML = `
+      <span class="badge" style="background:${riskColor};color:#fff">Risk: ${risk.toUpperCase()}</span>
+      <span class="badge" style="background:#2c3e50;color:#fff">Sentiment: ${data.sentiment}</span>
+      <span class="badge" style="background:#8e44ad;color:#fff">Fraud prob: ${(data.fraud_proba * 100).toFixed(1)}%</span>
+      <span class="badge" style="background:${data.fraud_flag ? '#c0392b' : '#27ae60'};color:#fff">${data.fraud_flag ? "FLAGGED" : "CLEAN"}</span>
+      ${ex.llm_generated ? '<span class="badge" style="background:#1a6b3a;color:#fff">LLM explanation</span>' : '<span class="badge" style="background:#888;color:#fff">rule-based</span>'}
+    `;
+    explainDiv.innerHTML = `<p style="line-height:1.7;margin-top:12px">${ex.summary || data.fraud_explanation || "No explanation available."}</p>`;
+  } catch (err) {
+    explainDiv.innerHTML = `<span style="color:red">Error: ${err.message}</span>`;
+  }
+});
+
+// ── Section 11: Agentic auditor ───────────────────────────────────────────────
+document.getElementById("audit-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const productId = document.getElementById("audit-product-id").value.trim();
+  const statusDiv = document.getElementById("audit-status");
+  const resultDiv = document.getElementById("audit-result");
+  const reportDiv = document.getElementById("audit-report-text");
+
+  resultDiv.style.display = "none";
+  statusDiv.innerHTML = `Running agentic audit for <strong>${productId}</strong>... this takes 30-60s while the LLM reasons over the data.`;
+
+  try {
+    const data = await getJSON(`/audit/${productId}`);
+    statusDiv.innerHTML = `Audit complete for <strong>${productId}</strong>.`;
+    // Format report: bold section headers, preserve line breaks
+    const formatted = (data.report || "No report generated.")
+      .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\n/g, "<br>");
+    reportDiv.innerHTML = `<div style="line-height:1.8;font-size:14px">${formatted}</div>`;
+    resultDiv.style.display = "block";
+  } catch (err) {
+    statusDiv.innerHTML = `<span style="color:red">Error: ${err.message}</span>`;
+  }
+});

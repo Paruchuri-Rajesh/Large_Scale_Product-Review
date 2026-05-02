@@ -44,7 +44,7 @@ from src.common.config import (  # noqa: E402
     THRESHOLDS_PATH,
 )
 from src.serve.fraud_explain import safe_fraud_explanation  # noqa: E402
-from src.stream.score_stream import _enrich_for_serving  # noqa: E402
+from src.common.text import enrich_for_serving as _enrich_for_serving  # noqa: E402
 # Fraud joblib pipeline columns: cleaned text + numeric behavioral features from training.
 from src.train.features import get_fraud_numeric_features  # noqa: E402
 
@@ -315,3 +315,27 @@ def stream_recent(limit: int = 50) -> JSONResponse:
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request) -> HTMLResponse:
     return templates.TemplateResponse("index.html", {"request": request})
+
+@app.get("/audit/{product_id}")
+async def audit_product(product_id: str) -> JSONResponse:
+    """Run the agentic auditor for a product_id and return the report."""
+    import sys
+    sys.path.append(str(Path(__file__).resolve().parents[2]))
+    try:
+        from src.agents.review_auditor import run_auditor
+        report = run_auditor(product_id)
+        return JSONResponse({"product_id": product_id, "report": report})
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.get("/audit/{product_id}")
+async def audit_product(product_id: str) -> JSONResponse:
+    """Run the agentic auditor for a product_id and return the report."""
+    import sys
+    sys.path.append(str(Path(__file__).resolve().parents[2]))
+    try:
+        from src.agents.review_auditor import run_auditor
+        report = run_auditor(product_id)
+        return JSONResponse({"product_id": product_id, "report": report})
+    except Exception as e:
+        raise HTTPException(500, str(e))
