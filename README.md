@@ -75,6 +75,20 @@ python -m src.train.error_analysis      # misclassified samples (needs Parquet +
 python -m src.train.drift_monitor       # drift summary JSON (needs train + test Parquet)
 ```
 
+Generate all current ML report artifacts (recommended after retraining):
+
+```bash
+make train
+python -m src.train.baselines
+python -m src.train.threshold_tuning
+python -m src.train.error_analysis
+python -m src.train.drift_monitor
+python -m src.train.ablation_study
+python -m src.train.calibration_report
+```
+
+All outputs are written under `reports/ml/`.
+
 Other Makefile targets:
 
 ```bash
@@ -182,7 +196,13 @@ API above. It includes:
   star rating (1–2 negative, 3 neutral, 4–5 positive).
 - **Fraud** — TF-IDF on cleaned review text plus **numeric behavioral features** passed
   into the classifier (exact column names are recorded in `models/meta.json` after a
-  successful train). Gradient boosted trees; weak fraud labels come from batch heuristics
+  successful train). The training flow now evaluates **two fraud candidates** with the
+  same feature pipeline:
+  - Gradient Boosted Trees (**GBT**)
+  - Random Forest (**RF**)
+  It auto-selects the better holdout F1 model, persists that model to
+  `models/fraud_pipeline.joblib`, and records the selected name in
+  `meta.json -> selection.fraud_model_name`. Weak fraud labels come from batch heuristics
   in ETL. The API returns **probabilities**; optional threshold tuning writes
   `models/thresholds.json` for analysis and dashboard use.
 
@@ -198,11 +218,21 @@ schema as production):
 | `python -m src.train.error_analysis` | Export misclassification samples for inspection. |
 | `python -m src.train.drift_monitor` | Compare train vs holdout (or configured splits); writes drift JSON for the dashboard. |
 | `python -m src.train.ablation_study` | Compare **full numeric + leakage-prone** fraud columns vs **reduced production** features on the same holdout; writes `reports/ml/fraud_ablation_*.csv/json` (offline study only). |
+| `python -m src.train.calibration_report` | Compare raw vs sigmoid (Platt) vs isotonic fraud probability calibration; writes `reports/ml/fraud_calibration_*.csv/json` with precision/recall/F1/ROC plus Brier/ECE. |
 
 These were added so evaluation is **interpretable and realistic**: baselines show uplift
 over naive choices, threshold tuning surfaces precision/recall tradeoffs, error exports
 support qualitative review, and drift summarizes distribution shift—together with the
 dashboard and the rule-based explanation layer on `/predict`.
+
+**Current ML outputs used in the project**
+
+- `reports/ml/baseline_comparison.csv` — baseline model comparison
+- `reports/ml/threshold_study.csv` + `models/thresholds.json` — operating-threshold analysis
+- `reports/ml/sentiment_error_samples.csv` and `reports/ml/fraud_error_samples.csv` — error slices
+- `reports/ml/drift_report.json` — train vs holdout drift snapshot
+- `reports/ml/fraud_ablation_*.csv/json` — leakage-prone vs reduced fraud feature study
+- `reports/ml/fraud_calibration_*.csv/json` — probability calibration quality (raw/sigmoid/isotonic)
 
 `python -m src.train.error_analysis` expects **trained** `models/*.joblib` artifacts in addition
 to Parquet splits (it loads the same pipelines as serving).

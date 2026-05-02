@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
@@ -139,7 +140,7 @@ def train_sentiment(train: pd.DataFrame, test: pd.DataFrame) -> dict:
         }
 
 
-def train_fraud(train: pd.DataFrame, test: pd.DataFrame) -> dict:
+def _fraud_preprocessor() -> ColumnTransformer:
     text_vec = TfidfVectorizer(
         ngram_range=(1, 2),
         min_df=3,
@@ -147,15 +148,46 @@ def train_fraud(train: pd.DataFrame, test: pd.DataFrame) -> dict:
         max_features=20_000,
         sublinear_tf=True,
     )
-    pre = ColumnTransformer(
+    return ColumnTransformer(
         [
             ("text", text_vec, "review_body_clean"),
             ("num", StandardScaler(with_mean=False), get_fraud_numeric_features()),
         ]
     )
-    pipe = Pipeline(
+
+
+def _eval_fraud_pipe(pipe: Pipeline, train: pd.DataFrame, test: pd.DataFrame) -> dict:
+    feat_cols = ["review_body_clean"] + get_fraud_numeric_features()
+    pipe.fit(train[feat_cols], train["fraud_label"])
+    proba = pipe.predict_proba(test[feat_cols])[:, 1]
+    preds = (proba >= 0.5).astype(int)
+    try:
+        auc = roc_auc_score(test["fraud_label"], proba)
+    except ValueError:
+        auc = float("nan")
+    prec, rec, f1, _ = precision_recall_fscore_support(
+        test["fraud_label"], preds, average="binary", zero_division=0
+    )
+    report = classification_report(
+        test["fraud_label"], preds, target_names=["clean", "fraud"], zero_division=0
+    )
+    return {
+        "pipe": pipe,
+        "proba": proba,
+        "preds": preds,
+        "report": report,
+        "auc": auc,
+        "precision": float(prec),
+        "recall": float(rec),
+        "f1": float(f1),
+    }
+
+
+def train_fraud(train: pd.DataFrame, test: pd.DataFrame) -> dict:
+    # Two fraud candidates, same feature flow; pick best by holdout F1.
+    gbt = Pipeline(
         [
-            ("pre", pre),
+            ("pre", _fraud_preprocessor()),
             (
                 "clf",
                 GradientBoostingClassifier(
@@ -167,51 +199,75 @@ def train_fraud(train: pd.DataFrame, test: pd.DataFrame) -> dict:
             ),
         ]
     )
+    rf = Pipeline(
+        [
+            ("pre", _fraud_preprocessor()),
+            (
+                "clf",
+                RandomForestClassifier(
+                    n_estimators=220,
+                    max_depth=16,
+                    min_samples_leaf=2,
+                    n_jobs=-1,
+                    random_state=42,
+                ),
+            ),
+        ]
+    )
 
     with mlflow.start_run(run_name="fraud-gbt-tfidf+behavior") as run:
-        mlflow.log_params(
-            {
+        gbt_out = _eval_fraud_pipe(gbt, train, test)
+        rf_out = _eval_fraud_pipe(rf, train, test)
+        if rf_out["f1"] > gbt_out["f1"]:
+            chosen = rf_out
+            chosen_name = "rf+tfidf+behavior"
+            chosen_params = {
+                "model": "rf+tfidf+behavior",
+                "n_estimators": 220,
+                "max_depth": 16,
+                "min_samples_leaf": 2,
+            }
+        else:
+            chosen = gbt_out
+            chosen_name = "gbt+tfidf+behavior"
+            chosen_params = {
                 "model": "gbt+tfidf+behavior",
-                "ngram_range": "1,2",
-                "max_features_text": 20000,
                 "n_estimators": 120,
                 "max_depth": 3,
+                "learning_rate": 0.1,
+            }
+        mlflow.log_params(
+            {
+                **chosen_params,
+                "ngram_range": "1,2",
+                "max_features_text": 20000,
                 "n_train": len(train),
                 "n_test": len(test),
                 "fraud_share_train": float(train["fraud_label"].mean()),
+                "candidate_gbt_f1": gbt_out["f1"],
+                "candidate_rf_f1": rf_out["f1"],
+                "selected_fraud_model_name": chosen_name,
             }
         )
-        feat_cols = ["review_body_clean"] + get_fraud_numeric_features()
-        pipe.fit(train[feat_cols], train["fraud_label"])
-        proba = pipe.predict_proba(test[feat_cols])[:, 1]
-        preds = (proba >= 0.5).astype(int)
-        try:
-            auc = roc_auc_score(test["fraud_label"], proba)
-        except ValueError:
-            auc = float("nan")
-        prec, rec, f1, _ = precision_recall_fscore_support(
-            test["fraud_label"], preds, average="binary", zero_division=0
-        )
-        report = classification_report(
-            test["fraud_label"], preds, target_names=["clean", "fraud"], zero_division=0
-        )
-        print("[fraud]\n" + report)
-        print(f"[fraud] roc_auc={auc:.4f}")
-        mlflow.log_metric("roc_auc", float(auc) if not np.isnan(auc) else 0.0)
-        mlflow.log_metric("precision", prec)
-        mlflow.log_metric("recall", rec)
-        mlflow.log_metric("f1", f1)
-        mlflow.log_text(report, "classification_report.txt")
-        mlflow.sklearn.log_model(pipe, artifact_path="fraud_model")
+        print(f"[fraud] selected={chosen_name} (gbt_f1={gbt_out['f1']:.4f}, rf_f1={rf_out['f1']:.4f})")
+        print("[fraud]\n" + chosen["report"])
+        print(f"[fraud] roc_auc={chosen['auc']:.4f}")
+        mlflow.log_metric("roc_auc", float(chosen["auc"]) if not np.isnan(chosen["auc"]) else 0.0)
+        mlflow.log_metric("precision", chosen["precision"])
+        mlflow.log_metric("recall", chosen["recall"])
+        mlflow.log_metric("f1", chosen["f1"])
+        mlflow.log_text(chosen["report"], "classification_report.txt")
+        mlflow.sklearn.log_model(chosen["pipe"], artifact_path="fraud_model")
 
-        joblib.dump(pipe, FRAUD_MODEL_PATH)
+        joblib.dump(chosen["pipe"], FRAUD_MODEL_PATH)
         mlflow.log_artifact(str(FRAUD_MODEL_PATH))
         return {
             "run_id": run.info.run_id,
-            "roc_auc": float(auc) if not np.isnan(auc) else None,
-            "precision": float(prec),
-            "recall": float(rec),
-            "f1": float(f1),
+            "model_name": chosen_name,
+            "roc_auc": float(chosen["auc"]) if not np.isnan(chosen["auc"]) else None,
+            "precision": float(chosen["precision"]),
+            "recall": float(chosen["recall"]),
+            "f1": float(chosen["f1"]),
         }
 
 
@@ -248,7 +304,7 @@ def main() -> None:
         },
         "selection": {
             "sentiment_model_name": _SENTIMENT_MODEL_NAME,
-            "fraud_model_name": _FRAUD_MODEL_NAME,
+            "fraud_model_name": str(fraud_metrics.get("model_name") or _FRAUD_MODEL_NAME),
         },
         "thresholds": load_json_optional(THRESHOLDS_PATH),
     }

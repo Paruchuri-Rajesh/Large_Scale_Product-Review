@@ -34,6 +34,9 @@ DRIFT_REPORT_PATH = ML_REPORTS_DIR / "drift_report.json"
 FRAUD_ABLATION_COMPARISON_PATH = ML_REPORTS_DIR / "fraud_ablation_comparison.csv"
 FRAUD_ABLATION_THRESHOLDS_PATH = ML_REPORTS_DIR / "fraud_ablation_thresholds.csv"
 FRAUD_ABLATION_SUMMARY_PATH = ML_REPORTS_DIR / "fraud_ablation_summary.json"
+FRAUD_CALIBRATION_REPORT_PATH = ML_REPORTS_DIR / "fraud_calibration_report.csv"
+FRAUD_CALIBRATION_BINS_PATH = ML_REPORTS_DIR / "fraud_calibration_bins.csv"
+FRAUD_CALIBRATION_SUMMARY_PATH = ML_REPORTS_DIR / "fraud_calibration_summary.json"
 
 MLFLOW_TRACKING_URI = os.environ.get(
     "MLFLOW_TRACKING_URI", f"file://{MLRUNS_DIR}"

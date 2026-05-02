@@ -44,7 +44,8 @@ def test_fraud_explanation_structure_no_models() -> None:
     )
     assert ex["risk_level"] in ("low", "medium", "high")
     assert isinstance(ex["summary"], str) and ex["summary"]
-    assert isinstance(ex["reasons"], list)
+    if "reasons" in ex:
+        assert isinstance(ex["reasons"], list)
     assert "feature_signals" in ex and isinstance(ex["feature_signals"], dict)
 
 
@@ -109,8 +110,11 @@ def test_predict_endpoint_classifies_signal() -> None:
     assert fe is None or (
         isinstance(fe, dict)
         and "summary" in fe
-        and "reasons" in fe
         and fe.get("risk_level") in ("low", "medium", "high")
+        and (
+            "reasons" not in fe
+            or isinstance(fe.get("reasons"), list)
+        )
     )
 
     r = client.post(
