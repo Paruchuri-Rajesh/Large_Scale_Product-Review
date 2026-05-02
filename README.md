@@ -29,6 +29,7 @@ src/
   ingest/generate_sample.py   # synthetic Amazon-shaped JSONL producer
   etl/batch_etl.py            # Spark batch: clean, features, aggregates, weak fraud labels
   train/train.py              # sklearn pipelines + MLflow tracking
+  train/{features,registry,evaluate,...}.py  # shared feature defs + helpers
   stream/score_stream.py      # Spark Structured Streaming foreachBatch scorer
   serve/app.py                # FastAPI endpoints
   serve/templates/index.html  # dashboard
@@ -114,6 +115,24 @@ curl -s -X POST http://127.0.0.1:8000/predict \
 # {"sentiment":"positive","fraud_proba":3.4e-07,"fraud_flag":0,...}
 ```
 
+## Dashboard (Web UI)
+
+The home page (`make serve` → `/`) is a single-page dashboard that polls the
+same REST endpoints as the table above. Highlights:
+
+- **Live sections** — recent streaming scores, product/reviewer aggregates,
+  and model overview KPI cards (latency, class balance, basic health).
+- **Threshold study** — precision/recall/F1 vs. fraud threshold from the
+  sweep in `models/thresholds.json`. The chart uses an **adaptive Y-axis**:
+  when metrics sit in a narrow band it zooms to that range (instead of always
+  stretching 0–1) so small tradeoffs stay visible; flat series get a small
+  padded band. Copy on the panel explains that harder synthetic evaluation is
+  meant to show a modest holdout tradeoff, not a flat curve by default.
+- **Model metadata** — a compact summary of `GET /metadata` (mirrors
+  `models/meta.json`): sentiment/fraud run IDs and headline metrics, fraud
+  ROC-AUC, numeric feature count, and selected model names when present —
+  styled like the ML overview cards rather than a raw JSON dump.
+
 ## Models
 
 - **Sentiment** — TF-IDF (uni+bi-gram) + multinomial logistic regression.
@@ -133,12 +152,25 @@ the joblib artifact).
 The proposal points at a 10 GB+ public dataset. The generator
 (`src/ingest/generate_sample.py`) produces statistically similar JSONL
 locally so the full pipeline can be exercised without the multi-GB
-download. Phrase pools are sentiment-stratified (so the sentiment model
-has a non-trivial separation to learn) and a configurable share of
-reviews are planted as fraud bursts (a small reviewer ring posting
-duplicate 5-star copy at a target product within hours). Set
-`--rows 1000000` to run on a million-row sample; the Spark job scales
-linearly.
+download. Phrase pools are sentiment-stratified; a configurable share of
+reviews are planted with fraud-like patterns (duplicate bursts, same-day
+velocity with paraphrased text, slower reviewer rings, plus organic hard
+negatives). Set `--rows 1000000` for large samples; Spark scales linearly.
+
+**Difficulty (`--difficulty`, default `medium`):** `easy` stays closer to the
+legacy generator (cleaner separation). `medium` adds cross-class phrase overlap,
+typos/punctuation noise, mixed-sentiment wording, and a richer fraud mix.
+`easy`/`medium`/`hard` step up overlap and subtle fraud so baseline gaps,
+threshold curves, and error analysis are more informative — harder synthetic
+data stresses models without changing the JSONL schema or downstream formats.
+
+Examples:
+
+```bash
+python -m src.ingest.generate_sample --rows 30000 --fraud-share 0.06 --difficulty hard
+make ingest   # Makefile uses medium by default
+ROWS=50000 DIFFICULTY=easy bash scripts/run_pipeline.sh
+```
 
 ## Tests
 
@@ -146,5 +178,6 @@ linearly.
 make test
 ```
 
-Covers text cleaning, the per-row serving feature path, and the FastAPI
-endpoints with the trained models loaded off disk.
+Covers text cleaning, the per-row serving feature path (including fraud
+numeric columns), and the FastAPI endpoints with the trained models loaded
+off disk.

@@ -23,11 +23,11 @@ header {
 header h1 { margin: 0 0 4px; font-size: 22px; }
 header .sub { margin: 0; color: var(--muted); font-size: 13px; }
 main {
-  max-width: 1100px;
+  max-width: 1140px;
   margin: 0 auto;
-  padding: 24px 32px 80px;
+  padding: 28px 32px 88px;
   display: grid;
-  gap: 18px;
+  gap: 24px;
 }
 .card {
   background: var(--panel);
@@ -35,8 +35,189 @@ main {
   border-radius: 10px;
   padding: 18px 20px;
 }
-.card h2 { margin: 0 0 6px; font-size: 16px; color: var(--accent); }
-.hint { color: var(--muted); font-size: 12px; margin: 0 0 12px; }
+.card.ml-overview {
+  padding: 20px 22px 22px;
+  border-color: #3d444d;
+  background: linear-gradient(180deg, #181f2e 0%, #161b22 100%);
+}
+.card.ml-section {
+  padding: 20px 22px 22px;
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
+  gap: 12px;
+}
+.kpi-card {
+  background: #0b0f14;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  min-height: 92px;
+}
+.kpi-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  margin: 0 0 8px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.kpi-value {
+  font-size: 17px;
+  font-weight: 700;
+  margin: 0;
+  line-height: 1.25;
+  word-break: break-word;
+  font-variant-numeric: tabular-nums;
+}
+.kpi-value.na {
+  font-size: 13px;
+  font-weight: 400;
+}
+.kpi-sub {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.chart-grid.duo-chart {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: 14px;
+  margin: 14px 0 18px;
+}
+.bar-chart-panel {
+  background: #0b0f14;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px 10px;
+  min-height: 120px;
+}
+.mini-chart-title {
+  margin: 0 0 10px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 600;
+}
+.bar-chart-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 280px;
+}
+.drift-bar-wrap {
+  margin-bottom: 12px;
+}
+.drift-bar-svg {
+  max-height: 220px;
+}
+
+.chosen-threshold-hero {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  background: linear-gradient(90deg, rgba(255, 153, 0, 0.12) 0%, #0b0f14 65%);
+  border: 1px solid rgba(255, 153, 0, 0.45);
+  border-radius: 8px;
+}
+.chosen-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 600;
+}
+.chosen-val {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.chosen-na {
+  font-size: 13px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.table-detail-label {
+  margin-top: 4px;
+}
+.table-details {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.15);
+}
+.table-details summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 500;
+  user-select: none;
+}
+.table-details summary:hover {
+  color: var(--fg);
+}
+.table-details[open] summary {
+  margin-bottom: 8px;
+}
+.table-wrap-muted table {
+  opacity: 0.92;
+}
+.chart-wrap-lg {
+  padding: 14px 14px 10px;
+}
+.chart-wrap-lg svg {
+  max-height: 300px;
+}
+
+.chart-y-band {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 6px 4px 0;
+  padding: 0 4px;
+}
+
+.meta-summary {
+  margin-top: 4px;
+}
+.meta-summary-heading {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 600;
+  margin: 14px 0 8px;
+}
+.meta-summary-heading:first-child {
+  margin-top: 0;
+}
+.meta-kpi-compact .kpi-card {
+  min-height: unset;
+  padding: 10px 12px;
+}
+.meta-kpi-compact .kpi-value {
+  font-size: 14px;
+  word-break: break-word;
+}
+.meta-run-id {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 500;
+}
+.card h2 { margin: 0 0 6px; font-size: 16px; color: var(--accent); letter-spacing: 0.01em; }
+.hint { color: var(--muted); font-size: 12px; margin: 0 0 14px; line-height: 1.45; }
 textarea {
   width: 100%;
   background: #0b0f14;
@@ -112,3 +293,170 @@ tr.flag-fraud td { color: var(--bad); }
 .badge.negative { background: rgba(248,81,73,0.18); color: var(--bad); }
 .badge.neutral { background: rgba(139,148,158,0.18); color: var(--muted); }
 code { font-size: 12px; }
+
+.ml-panel { min-height: 1.5em; font-size: 12.5px; }
+.ml-subhead {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+.na { color: var(--muted); font-style: italic; }
+.table-wrap { overflow-x: auto; margin-top: 10px; }
+table.ml-table {
+  font-size: 11.5px;
+}
+table.ml-table th { white-space: nowrap; }
+table.ml-table th,
+table.ml-table td {
+  padding: 4px 8px;
+}
+table.ml-table.ml-table-compact th,
+table.ml-table.ml-table-compact td {
+  padding: 3px 6px;
+}
+.ml-row-best {
+  background: rgba(255, 153, 0, 0.09);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.baseline-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.baseline-task-card {
+  background: #0b0f14;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.baseline-task-card.is-winner {
+  border-color: rgba(255, 153, 0, 0.55);
+  background: rgba(255, 153, 0, 0.05);
+}
+.baseline-task-card .task-label {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 6px;
+}
+.baseline-task-card .task-model {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 4px;
+  word-break: break-word;
+}
+.baseline-task-card .task-metric {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+}
+.baseline-task-card .task-metric strong {
+  color: var(--fg);
+  font-weight: 600;
+}
+.chart-wrap {
+  background: #0b0f14;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 12px 8px;
+  margin-bottom: 12px;
+}
+.chart-wrap svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 240px;
+}
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 18px;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 8px;
+  padding: 0 4px;
+}
+.chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.chart-legend i {
+  display: inline-block;
+  width: 18px;
+  height: 3px;
+  border-radius: 1px;
+  vertical-align: middle;
+}
+.drift-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.drift-card {
+  background: #0b0f14;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  min-width: 140px;
+}
+.drift-card .label { font-size: 11px; color: var(--muted); margin: 0 0 4px; }
+.drift-card .val { font-size: 15px; font-weight: 600; margin: 0; }
+.drift-table-note {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 0 0 6px;
+}
+.threshold-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+.threshold-box {
+  background: linear-gradient(180deg, #101620 0%, #0b0f14 100%);
+  border: 2px solid var(--accent);
+  border-radius: 10px;
+  padding: 16px 18px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+}
+.threshold-box h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--accent);
+  font-weight: 700;
+  line-height: 1.35;
+}
+.threshold-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px 12px;
+  font-size: 13px;
+}
+.threshold-grid div {
+  color: var(--muted);
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+.threshold-grid strong {
+  color: var(--fg);
+  font-weight: 600;
+  display: block;
+  margin-top: 2px;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+.threshold-box-muted {
+  border-color: var(--border);
+  border-width: 1px;
+  box-shadow: none;
+  background: #0b0f14;
+}
+.threshold-box-muted h3 {
+  color: var(--muted);
+  font-weight: 600;
+}

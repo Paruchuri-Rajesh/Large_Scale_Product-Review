@@ -7,10 +7,11 @@ cd "$(dirname "$0")/.."
 
 ROWS="${ROWS:-30000}"
 FRAUD_SHARE="${FRAUD_SHARE:-0.06}"
+DIFFICULTY="${DIFFICULTY:-medium}"
 PORT="${PORT:-8000}"
 
-echo "[1/5] generating sample (${ROWS} rows, fraud=${FRAUD_SHARE}) ..."
-python3 -m src.ingest.generate_sample --rows "${ROWS}" --fraud-share "${FRAUD_SHARE}"
+echo "[1/5] generating sample (${ROWS} rows, fraud=${FRAUD_SHARE}, difficulty=${DIFFICULTY}) ..."
+python3 -m src.ingest.generate_sample --rows "${ROWS}" --fraud-share "${FRAUD_SHARE}" --difficulty "${DIFFICULTY}"
 
 echo "[2/5] running Spark batch ETL ..."
 python3 -m src.etl.batch_etl

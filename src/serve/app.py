@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import glob
 import json
+import math
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional  # Optional keeps Pydantic happy on Python 3.9 (no `str | None` runtime eval).
 
 import joblib
 import pandas as pd
@@ -30,6 +31,8 @@ from starlette.requests import Request
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.common.config import (  # noqa: E402
+    BASELINE_REPORT_PATH,
+    DRIFT_REPORT_PATH,
     FRAUD_MODEL_PATH,
     META_PATH,
     PRODUCT_AGG_PARQUET,
@@ -37,9 +40,14 @@ from src.common.config import (  # noqa: E402
     SENTIMENT_LABELS,
     SENTIMENT_MODEL_PATH,
     STREAM_OUT_DIR,
+    THRESHOLD_REPORT_PATH,
+    THRESHOLDS_PATH,
 )
 from src.stream.score_stream import _enrich_for_serving  # noqa: E402
-from src.train.train import NUMERIC_FRAUD_FEATURES  # noqa: E402
+# Fraud joblib pipeline columns: cleaned text + numeric behavioral features from training.
+from src.train.features import get_fraud_numeric_features  # noqa: E402
+
+NUMERIC_FRAUD_FEATURES = get_fraud_numeric_features()
 
 app = FastAPI(title="Amazon Reviews — Sentiment & Fraud", version="1.0.0")
 
@@ -50,13 +58,13 @@ templates = Jinja2Templates(directory=_HERE / "templates")
 
 class Review(BaseModel):
     review_body: str = Field(..., min_length=1)
-    review_headline: str | None = ""
-    star_rating: int | None = Field(default=None, ge=1, le=5)
-    helpful_votes: int | None = 0
-    total_votes: int | None = 0
-    verified_purchase: bool | None = True
-    product_id: str | None = None
-    reviewer_id: str | None = None
+    review_headline: Optional[str] = ""
+    star_rating: Optional[int] = Field(default=None, ge=1, le=5)
+    helpful_votes: Optional[int] = 0
+    total_votes: Optional[int] = 0
+    verified_purchase: Optional[bool] = True
+    product_id: Optional[str] = None
+    reviewer_id: Optional[str] = None
 
 
 class BatchRequest(BaseModel):
@@ -66,6 +74,110 @@ class BatchRequest(BaseModel):
 # ---- model load (lazy, once) -----------------------------------------------
 
 _state: dict[str, Any] = {"sentiment": None, "fraud": None, "meta": None}
+
+
+# First N rows of a CSV as JSON-serializable records (optional ML reports).
+def _csv_preview_records(path: Path, max_rows: int = 5) -> Any | None:
+    if not path.exists():
+        return None
+    try:
+        df = pd.read_csv(path)
+        return df.head(max_rows).to_dict(orient="records")
+    except Exception:
+        return None
+
+
+# Parse JSON artifact if present; never raise for optional dashboard fields.
+def _json_optional(path: Path) -> Any | None:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return None
+
+
+def _float_or_none(x: Any) -> float | None:
+    try:
+        if x is None or (isinstance(x, float) and math.isnan(x)):
+            return None
+        if pd.isna(x):
+            return None
+        v = float(x)
+        if math.isnan(v):
+            return None
+        return v
+    except (TypeError, ValueError):
+        return None
+
+
+# Full baseline CSV: best rows per task + series for dashboard charts (preview stays separate).
+def _baseline_extras(path: Path) -> dict[str, Any]:
+    empty: dict[str, Any] = {
+        "best_sentiment_baseline": None,
+        "best_fraud_baseline": None,
+        "baseline_chart_series": {"sentiment": [], "fraud": []},
+    }
+    if not path.exists():
+        return empty
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return empty
+    if df.empty or "task" not in df.columns:
+        return empty
+    tcol = df["task"].astype(str).str.strip().str.lower()
+
+    def sentiment_block(sdf: pd.DataFrame) -> None:
+        if sdf.empty or "f1_macro" not in sdf.columns:
+            return
+        fm = pd.to_numeric(sdf["f1_macro"], errors="coerce")
+        rows_chart = []
+        for _, r in sdf.iterrows():
+            rows_chart.append(
+                {
+                    "model_name": str(r.get("model_name", "") or ""),
+                    "f1_macro": _float_or_none(r.get("f1_macro")),
+                }
+            )
+        empty["baseline_chart_series"]["sentiment"] = rows_chart
+        if not fm.notna().any():
+            return
+        row = sdf.loc[fm.idxmax()]
+        empty["best_sentiment_baseline"] = {
+            "model_name": str(row.get("model_name", "") or ""),
+            "f1_macro": _float_or_none(row.get("f1_macro")),
+            "f1_weighted": _float_or_none(row.get("f1_weighted")),
+        }
+
+    def fraud_block(fdf: pd.DataFrame) -> None:
+        if fdf.empty or "f1" not in fdf.columns:
+            return
+        f1 = pd.to_numeric(fdf["f1"], errors="coerce")
+        rows_chart = []
+        for _, r in fdf.iterrows():
+            rows_chart.append(
+                {
+                    "model_name": str(r.get("model_name", "") or ""),
+                    "f1": _float_or_none(r.get("f1")),
+                    "roc_auc": _float_or_none(r.get("roc_auc")),
+                }
+            )
+        empty["baseline_chart_series"]["fraud"] = rows_chart
+        if not f1.notna().any():
+            return
+        row = fdf.loc[f1.idxmax()]
+        empty["best_fraud_baseline"] = {
+            "model_name": str(row.get("model_name", "") or ""),
+            "f1": _float_or_none(row.get("f1")),
+            "precision": _float_or_none(row.get("precision")),
+            "recall": _float_or_none(row.get("recall")),
+            "roc_auc": _float_or_none(row.get("roc_auc")),
+        }
+
+    sentiment_block(df[tcol == "sentiment"])
+    fraud_block(df[tcol == "fraud"])
+    return empty
 
 
 def _load_models() -> None:
@@ -114,7 +226,19 @@ def healthz() -> dict:
 @app.get("/metadata")
 def metadata() -> dict:
     _load_models()
-    return _state["meta"] or {"warning": "no meta.json on disk"}
+    if _state["meta"]:
+        out: dict[str, Any] = dict(_state["meta"])
+    else:
+        out = {"warning": "no meta.json on disk"}
+    out["baseline_report_preview"] = _csv_preview_records(BASELINE_REPORT_PATH)
+    bl_ex = _baseline_extras(BASELINE_REPORT_PATH)
+    out["best_sentiment_baseline"] = bl_ex["best_sentiment_baseline"]
+    out["best_fraud_baseline"] = bl_ex["best_fraud_baseline"]
+    out["baseline_chart_series"] = bl_ex["baseline_chart_series"]
+    out["threshold_report_preview"] = _csv_preview_records(THRESHOLD_REPORT_PATH)
+    out["drift_summary"] = _json_optional(DRIFT_REPORT_PATH)
+    out["selected_thresholds"] = _json_optional(THRESHOLDS_PATH)
+    return out
 
 
 @app.post("/predict")

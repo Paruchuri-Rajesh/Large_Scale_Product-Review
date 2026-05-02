@@ -108,24 +108,35 @@ def product_features(df: DataFrame) -> DataFrame:
 
 def fraud_label(df: DataFrame) -> DataFrame:
     """Heuristic weak label for fraud — exact-duplicate body within a product, or
-    a high-velocity reviewer with a 5-star monoculture. The supervised model
-    learns from this *and* generalizes via text + behavioral features.
+    a high-velocity reviewer with a 5-star monoculture, or same-day spam.
+
+    A small random relabeling step weakens perfect alignment between the rule
+    outputs and the binary target (the full rule-derived columns still exist
+    in Parquet, but the label is not 100% deterministic in Y), so the model
+    cannot simply memorize predicate outcomes when leaky numerics are withheld.
     """
     dup_w = Window.partitionBy("product_id", "review_body_clean")
+    r = F.rand(42)
+    rule = (
+        (F.col("dup_in_product") >= 3)
+        | (
+            (F.col("reviewer_review_count") >= 8)
+            & (F.col("reviewer_pct_5star") >= 0.95)
+            & (F.col("reviewer_verified_share") <= 0.2)
+        )
+        | (F.col("reviewer_reviews_same_day") >= 5)
+    ).cast("int")
     return (
         df.withColumn("dup_in_product", F.count("*").over(dup_w))
+        .withColumn("_rule_fraud", rule)
         .withColumn(
             "fraud_label",
-            (
-                (F.col("dup_in_product") >= 3)
-                | (
-                    (F.col("reviewer_review_count") >= 8)
-                    & (F.col("reviewer_pct_5star") >= 0.95)
-                    & (F.col("reviewer_verified_share") <= 0.2)
-                )
-                | (F.col("reviewer_reviews_same_day") >= 5)
-            ).cast("int"),
+            F.when((F.col("_rule_fraud") == 1) & (r < F.lit(0.034)), F.lit(0))
+            .when((F.col("_rule_fraud") == 0) & (r < F.lit(0.0015)), F.lit(1))
+            .otherwise(F.col("_rule_fraud"))
+            .cast("int"),
         )
+        .drop("_rule_fraud")
     )
 
 

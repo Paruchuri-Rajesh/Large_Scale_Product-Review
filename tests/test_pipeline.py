@@ -17,7 +17,8 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from src.common.text import clean_text, sentiment_label_from_rating
 from src.stream.score_stream import _enrich_for_serving
-from src.train.train import NUMERIC_FRAUD_FEATURES
+# Assert enrichment produces every column the persisted fraud model expects.
+from src.train.features import get_fraud_numeric_features
 
 
 def test_clean_text_strips_html_and_urls() -> None:
@@ -49,7 +50,7 @@ def test_enrich_for_serving_has_all_numeric_features() -> None:
         ]
     )
     out = _enrich_for_serving(pdf)
-    for col in NUMERIC_FRAUD_FEATURES:
+    for col in get_fraud_numeric_features():
         assert col in out.columns, f"missing serving feature: {col}"
     assert out.loc[0, "review_body_clean"].startswith("amazing product")
 
