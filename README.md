@@ -197,6 +197,7 @@ schema as production):
 | `python -m src.train.threshold_tuning` | Sweep fraud thresholds; writes threshold study CSV + optional `models/thresholds.json`. |
 | `python -m src.train.error_analysis` | Export misclassification samples for inspection. |
 | `python -m src.train.drift_monitor` | Compare train vs holdout (or configured splits); writes drift JSON for the dashboard. |
+| `python -m src.train.ablation_study` | Compare **full numeric + leakage-prone** fraud columns vs **reduced production** features on the same holdout; writes `reports/ml/fraud_ablation_*.csv/json` (offline study only). |
 
 These were added so evaluation is **interpretable and realistic**: baselines show uplift
 over naive choices, threshold tuning surfaces precision/recall tradeoffs, error exports

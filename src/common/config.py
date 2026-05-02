@@ -31,6 +31,9 @@ THRESHOLD_REPORT_PATH = ML_REPORTS_DIR / "threshold_study.csv"
 SENTIMENT_ERROR_REPORT_PATH = ML_REPORTS_DIR / "sentiment_error_samples.csv"
 FRAUD_ERROR_REPORT_PATH = ML_REPORTS_DIR / "fraud_error_samples.csv"
 DRIFT_REPORT_PATH = ML_REPORTS_DIR / "drift_report.json"
+FRAUD_ABLATION_COMPARISON_PATH = ML_REPORTS_DIR / "fraud_ablation_comparison.csv"
+FRAUD_ABLATION_THRESHOLDS_PATH = ML_REPORTS_DIR / "fraud_ablation_thresholds.csv"
+FRAUD_ABLATION_SUMMARY_PATH = ML_REPORTS_DIR / "fraud_ablation_summary.json"
 
 MLFLOW_TRACKING_URI = os.environ.get(
     "MLFLOW_TRACKING_URI", f"file://{MLRUNS_DIR}"
