@@ -309,7 +309,7 @@ async function runAudit(pid){
   try{
     var data=await getJSON('/audit/'+productId);
     gi('audit-status').innerHTML='<span style="color:var(--accent)">✓</span> Audit complete · '+productId;
-    var formatted=(data.report||'No report.').replace(/(PRODUCT SUMMARY|FRAUD SIGNALS|RISK VERDICT|RECOMMENDATIONS|Audit Report:?)/gi,'<strong style="color:#00e5a0;font-family:Space Mono,monospace;font-size:11px;letter-spacing:1px;display:block;margin-top:18px;margin-bottom:4px;border-bottom:1px solid rgba(0,229,160,0.2);padding-bottom:4px">$1</strong>').replace(/\n/g,'<br>');
+    var formatted=(data.report||'No report.').replace(/-{3,}/g,'').replace(/(<br>\s*){3,}/g,'<br><br>').replace(/(PRODUCT SUMMARY|FRAUD SIGNALS|RISK VERDICT|RECOMMENDATIONS|Audit Report:?)/gi,'<strong style="color:#00e5a0;font-family:Space Mono,monospace;font-size:11px;letter-spacing:1px;display:block;margin-top:18px;margin-bottom:4px;border-bottom:1px solid rgba(0,229,160,0.2);padding-bottom:4px">$1</strong>').replace(/(<strong[^>]*>[^<]+<\/strong>)(<br>\s*)*:/g,'$1').replace(/\*\*(.*?)\*\*/g,'<strong style="color:#e8eaf0">$1</strong>').replace(/\n/g,'<br>');
     gi('audit-report').innerHTML=formatted;
     gi('audit-report').style.display='block';
   }catch(e){gi('audit-status').innerHTML='<span style="color:var(--accent2)">Error: '+e.message+'</span>';}

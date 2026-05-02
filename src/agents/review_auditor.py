@@ -137,7 +137,8 @@ FRAUD SIGNALS
 Describe specific patterns found. List exactly 5 suspicious reviewers maximum — no more.
 
 RISK VERDICT
-State LOW, MEDIUM, or HIGH with a one-paragraph justification.
+Start this section with exactly: "RISK VERDICT for [product_id] is HIGH/MEDIUM/LOW because..." all on one line.
+Never split across lines.
 
 RECOMMENDATIONS
 Give exactly 3 concrete actions.
