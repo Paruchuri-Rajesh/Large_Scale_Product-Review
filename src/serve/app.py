@@ -43,6 +43,7 @@ from src.common.config import (  # noqa: E402
     THRESHOLD_REPORT_PATH,
     THRESHOLDS_PATH,
 )
+from src.serve.fraud_explain import safe_fraud_explanation  # noqa: E402
 from src.stream.score_stream import _enrich_for_serving  # noqa: E402
 # Fraud joblib pipeline columns: cleaned text + numeric behavioral features from training.
 from src.train.features import get_fraud_numeric_features  # noqa: E402
@@ -202,17 +203,31 @@ def _score(reviews: list[Review]) -> list[dict]:
     fraud_proba = _state["fraud"].predict_proba(feats[feat_cols])[:, 1]
     out = []
     for i, r in enumerate(reviews):
-        out.append(
-            {
-                "review_body": r.review_body,
-                "sentiment_label": int(sent_label[i]),
-                "sentiment": SENTIMENT_LABELS[int(sent_label[i])],
-                "fraud_proba": float(fraud_proba[i]),
-                "fraud_flag": int(fraud_proba[i] >= 0.5),
-                "product_id": r.product_id,
-                "reviewer_id": r.reviewer_id,
-            }
+        fp = float(fraud_proba[i])
+        ff = int(fp >= 0.5)
+        row_dict = feats.iloc[i].to_dict()
+        explain = safe_fraud_explanation(
+            fraud_proba=fp,
+            fraud_flag=ff,
+            star_rating=r.star_rating,
+            verified_purchase=bool(r.verified_purchase),
+            review_body=r.review_body,
+            row_features=row_dict,
         )
+        row_out: dict[str, Any] = {
+            "review_body": r.review_body,
+            "sentiment_label": int(sent_label[i]),
+            "sentiment": SENTIMENT_LABELS[int(sent_label[i])],
+            "fraud_proba": fp,
+            "fraud_flag": ff,
+            "product_id": r.product_id,
+            "reviewer_id": r.reviewer_id,
+        }
+        if explain is not None:
+            row_out["fraud_explanation"] = explain
+        else:
+            row_out["fraud_explanation"] = None
+        out.append(row_out)
     return out
 
 

@@ -256,6 +256,34 @@ function chosenThresholdHero(sel) {
   return `<div class="chosen-threshold-hero"><span class="chosen-label">Chosen threshold (best F1)</span><span class="chosen-val">${esc(fmtNum(t, 4))}</span></div>`;
 }
 
+function renderFraudExplanation(fe) {
+  const wrap = $("score-explanation");
+  if (!wrap) return;
+  if (fe === null || fe === undefined) {
+    wrap.innerHTML = `<div class="fraud-explain-panel fraud-explain-na">Explanation not available</div>`;
+    return;
+  }
+  if (typeof fe !== "object") {
+    wrap.innerHTML = `<div class="fraud-explain-panel fraud-explain-na">Explanation not available</div>`;
+    return;
+  }
+  const risk = String(fe.risk_level || "").toLowerCase();
+  const badgeClass =
+    risk === "high"
+      ? "risk-badge risk-high"
+      : risk === "medium"
+        ? "risk-badge risk-medium"
+        : "risk-badge risk-low";
+  const reasons = Array.isArray(fe.reasons) ? fe.reasons : [];
+  const bullets = reasons.map((t) => `<li>${esc(String(t))}</li>`).join("");
+  const summary = fe.summary ? `<p class="fraud-explain-summary">${esc(String(fe.summary))}</p>` : "";
+  wrap.innerHTML = `<div class="fraud-explain-panel">
+    <div class="fraud-explain-head"><span class="${badgeClass}">${esc(risk || "unknown")} risk</span></div>
+    ${summary}
+    <ul class="fraud-reasons">${bullets}</ul>
+  </div>`;
+}
+
 $("score-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const body = $("body").value.trim();
@@ -267,10 +295,13 @@ $("score-form").addEventListener("submit", async (e) => {
     verified_purchase: $("verified").value === "true",
   };
   $("score-out").textContent = "scoring…";
+  renderFraudExplanation(undefined);
   try {
     const out = await postJSON("/predict", payload);
+    renderFraudExplanation(out.fraud_explanation);
     $("score-out").textContent = JSON.stringify(out, null, 2);
   } catch (err) {
+    renderFraudExplanation(null);
     $("score-out").textContent = String(err);
   }
 });

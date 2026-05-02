@@ -21,6 +21,33 @@ from src.stream.score_stream import _enrich_for_serving
 from src.train.features import get_fraud_numeric_features
 
 
+def test_fraud_explanation_structure_no_models() -> None:
+    """Rule-based explanation uses only serving-time fields; must always shape."""
+    from src.serve.fraud_explain import build_fraud_explanation
+
+    row = {
+        "star_rating": 5,
+        "verified_purchase_int": 1,
+        "body_len": 80,
+        "body_word_count": 14,
+        "exclam_count": 0,
+        "helpful_votes": 0,
+        "total_votes": 0,
+    }
+    ex = build_fraud_explanation(
+        fraud_proba=0.22,
+        fraud_flag=0,
+        star_rating=5,
+        verified_purchase=True,
+        review_body="Great product, works as expected.",
+        row_features=row,
+    )
+    assert ex["risk_level"] in ("low", "medium", "high")
+    assert isinstance(ex["summary"], str) and ex["summary"]
+    assert isinstance(ex["reasons"], list)
+    assert "feature_signals" in ex and isinstance(ex["feature_signals"], dict)
+
+
 def test_clean_text_strips_html_and_urls() -> None:
     assert (
         clean_text("Check <b>this</b> https://example.com !!!").strip()
@@ -77,6 +104,14 @@ def test_predict_endpoint_classifies_signal() -> None:
     assert r.status_code == 200
     body = r.json()
     assert body["sentiment"] == "negative"
+    assert "fraud_explanation" in body
+    fe = body["fraud_explanation"]
+    assert fe is None or (
+        isinstance(fe, dict)
+        and "summary" in fe
+        and "reasons" in fe
+        and fe.get("risk_level") in ("low", "medium", "high")
+    )
 
     r = client.post(
         "/predict",
@@ -87,7 +122,9 @@ def test_predict_endpoint_classifies_signal() -> None:
         },
     )
     assert r.status_code == 200
-    assert r.json()["sentiment"] == "positive"
+    pos = r.json()
+    assert pos["sentiment"] == "positive"
+    assert "fraud_explanation" in pos
 
 
 def test_healthz() -> None:

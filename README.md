@@ -8,6 +8,13 @@ trains **sentiment** and **fraud** models tracked in **MLflow**, scores new
 reviews continuously through **Spark Structured Streaming**, and serves
 predictions + a dashboard from a **FastAPI** app.
 
+On top of that core loop, the repo includes **ML evaluation and reporting**:
+baseline model comparison, fraud threshold tuning (CSV + optional `models/thresholds.json`),
+error-analysis exports, drift monitoring, and an **upgraded dashboard** that surfaces
+those artifacts alongside aggregates and streaming output. Single-review scoring adds an
+optional, **rule-based `fraud_explanation`** field on `POST /predict` (plain-language summary,
+risk band, and bullets from existing scores and serving-time features—no LLM and no external APIs).
+
 ```
 ┌────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
 │  ingest    │──>│ Spark batch  │──>│  train (ML-  │──>│  Spark       │──>│  FastAPI     │
@@ -41,33 +48,63 @@ scripts/
 tests/test_pipeline.py
 data/{raw,processed,streaming_in,streaming_out}/
 models/   mlruns/
+reports/ml/                  # baseline / threshold / error / drift outputs (when scripts run)
 ```
 
-## Quickstart
+## Commands
+
+Typical workflow commands:
 
 ```bash
-make install     # pip install -r requirements.txt
-make all         # ingest + Spark ETL + train + MLflow logging
-make stream-once # one-shot scoring of whatever's in data/streaming_in/
-make serve       # http://127.0.0.1:8000/  (dashboard + REST)
-make mlflow-ui   # http://127.0.0.1:5000/  (experiment tracking)
+make install          # pip install -r requirements.txt
+make ingest           # synthetic JSONL (see difficulty below; Makefile defaults to medium)
+make etl              # Spark batch ETL → Parquet features + aggregates
+make train            # train sentiment + fraud, MLflow logging, meta.json
+make serve            # FastAPI + dashboard → http://127.0.0.1:8000/
+make stream           # Spark Structured Streaming scorer (continuous)
+make feed             # drip raw reviews into data/streaming_in/
+make test             # pytest
 ```
 
-Or all at once:
+Optional ML evaluation scripts (write under `reports/ml/` when successful):
 
 ```bash
-bash scripts/run_pipeline.sh   # ROWS=200000 FRAUD_SHARE=0.05 PORT=8000 to override
+python -m src.train.baselines          # baseline comparison CSV (needs train/test Parquet)
+python -m src.train.threshold_tuning    # threshold sweep + thresholds.json (needs test Parquet + trained fraud model)
+python -m src.train.error_analysis      # misclassified samples (needs Parquet + both trained models)
+python -m src.train.drift_monitor       # drift summary JSON (needs train + test Parquet)
 ```
 
-To watch the streaming dashboard refresh, open two terminals:
+Other Makefile targets:
 
 ```bash
-# terminal 1 — continuous streaming scorer
+make stream-once      # score whatever is already in data/streaming_in/, then exit
+make mlflow-ui        # MLflow UI on http://127.0.0.1:5000/
+make all              # ingest + etl + train
+```
+
+One-shot full pipeline:
+
+```bash
+bash scripts/run_pipeline.sh   # ROWS=200000 FRAUD_SHARE=0.05 PORT=8000 etc.
+```
+
+## Live demo (three terminals)
+
+For an end-to-end **live** demo with the dashboard and streaming updates:
+
+```bash
+# Terminal 1 — API + web UI
+make serve
+
+# Terminal 2 — streaming scorer (reads data/streaming_in/, writes scored JSON)
 make stream
 
-# terminal 2 — drip new reviews into data/streaming_in/
+# Terminal 3 — synthetic drip producer into the streaming inbox
 make feed
 ```
+
+Open **http://127.0.0.1:8000/** in a browser: use **Score a review** (includes fraud explanation when scoring succeeds), watch **Streaming feed** refresh, and browse the ML sections fed by `/metadata`.
 
 ## Using a real Amazon Reviews dataset
 
@@ -102,8 +139,8 @@ Spark configuration in `src/common/spark.py` is defaulted for local laptops
 |---|---|---|
 | GET | `/healthz` | liveness |
 | GET | `/metadata` | training metrics + feature columns |
-| POST | `/predict` | score one review |
-| POST | `/predict/batch` | score up to 1000 reviews |
+| POST | `/predict` | score one review (`fraud_explanation` optional object when generation succeeds) |
+| POST | `/predict/batch` | score up to 1000 reviews (each item may include `fraud_explanation`) |
 | GET | `/aggregates/products?limit=N&by=col` | top-N from product rollup |
 | GET | `/aggregates/fraud-reviewers?limit=N` | suspicious reviewers |
 | GET | `/stream/recent?limit=N` | latest streaming-scored rows |
@@ -117,60 +154,95 @@ curl -s -X POST http://127.0.0.1:8000/predict \
 
 ## Dashboard (Web UI)
 
-The home page (`make serve` → `/`) is a single-page dashboard that polls the
-same REST endpoints as the table above. Highlights:
+The home page (`make serve` → `/`) is a single-page dashboard backed by the REST
+API above. It includes:
 
-- **Live sections** — recent streaming scores, product/reviewer aggregates,
-  and model overview KPI cards (latency, class balance, basic health).
-- **Threshold study** — precision/recall/F1 vs. fraud threshold from the
-  sweep in `models/thresholds.json`. The chart uses an **adaptive Y-axis**:
-  when metrics sit in a narrow band it zooms to that range (instead of always
-  stretching 0–1) so small tradeoffs stay visible; flat series get a small
-  padded band. Copy on the panel explains that harder synthetic evaluation is
-  meant to show a modest holdout tradeoff, not a flat curve by default.
-- **Model metadata** — a compact summary of `GET /metadata` (mirrors
-  `models/meta.json`): sentiment/fraud run IDs and headline metrics, fraud
-  ROC-AUC, numeric feature count, and selected model names when present —
-  styled like the ML overview cards rather than a raw JSON dump.
+- **ML overview** — KPI-style cards from `/metadata` (train/test counts, best baseline
+  picks from the comparison CSV when present, selected fraud threshold, fraud ROC-AUC).
+- **Baseline comparison** — preview table and bar charts driven by baseline CSV
+  data exposed through `/metadata`.
+- **Threshold study** — precision/recall/F1 vs. fraud threshold using the sweep in
+  `models/thresholds.json` when available. The chart uses an **adaptive Y-axis** so
+  narrow metric bands remain readable (with a safe layout when curves are nearly flat).
+- **Drift summary** — population cards and shift summaries when `reports/ml/drift_report.json`
+  exists and is surfaced via `/metadata`.
+- **Selected thresholds** — chosen fraud threshold payload from `/metadata`.
+- **Model metadata** — compact summary of training runs and feature lists (no raw JSON dump).
+- **Score a review** — calls `POST /predict` and shows the JSON response plus a **fraud
+  explanation panel** (risk level, short summary, bullet reasons) when `fraud_explanation`
+  is returned.
+- **Operational views** — batch aggregates (products, suspicious reviewers) and a
+  **streaming feed** of recent scored rows from the streaming job.
 
-## Models
+## Models and evaluation
 
-- **Sentiment** — TF-IDF (uni+bi-gram) + multinomial logistic regression.
-  Labels derived from star rating: 1–2 negative, 3 neutral, 4–5 positive.
-- **Fraud** — TF-IDF over body + 17 numeric / behavioral features
-  (per-row stats + reviewer/product aggregates + duplicate count) into a
-  Gradient Boosted Trees classifier; weak labels from heuristic
-  (duplicate-text bursts, high-velocity 5-star unverified reviewers).
-  Probabilities are returned so you can choose a threshold per business need.
+**Training (production path)** — `make train` / `src/train/train.py`:
 
-Both pipelines are logged to MLflow under experiment
-`amazon_reviews_sentiment_fraud` (params, metrics, classification report,
-the joblib artifact).
+- **Sentiment** — TF-IDF (uni+bi-gram) + multinomial logistic regression; labels from
+  star rating (1–2 negative, 3 neutral, 4–5 positive).
+- **Fraud** — TF-IDF on cleaned review text plus **numeric behavioral features** passed
+  into the classifier (exact column names are recorded in `models/meta.json` after a
+  successful train). Gradient boosted trees; weak fraud labels come from batch heuristics
+  in ETL. The API returns **probabilities**; optional threshold tuning writes
+  `models/thresholds.json` for analysis and dashboard use.
 
-## Notes on the synthetic generator
+Both runs log to MLflow under experiment `amazon_reviews_sentiment_fraud`.
 
-The proposal points at a 10 GB+ public dataset. The generator
-(`src/ingest/generate_sample.py`) produces statistically similar JSONL
-locally so the full pipeline can be exercised without the multi-GB
-download. Phrase pools are sentiment-stratified; a configurable share of
-reviews are planted with fraud-like patterns (duplicate bursts, same-day
-velocity with paraphrased text, slower reviewer rings, plus organic hard
-negatives). Set `--rows 1000000` for large samples; Spark scales linearly.
+**Extra evaluation scripts** (run after ETL has produced train/test Parquet — same
+schema as production):
 
-**Difficulty (`--difficulty`, default `medium`):** `easy` stays closer to the
-legacy generator (cleaner separation). `medium` adds cross-class phrase overlap,
-typos/punctuation noise, mixed-sentiment wording, and a richer fraud mix.
-`easy`/`medium`/`hard` step up overlap and subtle fraud so baseline gaps,
-threshold curves, and error analysis are more informative — harder synthetic
-data stresses models without changing the JSONL schema or downstream formats.
+| Script | Role |
+|--------|------|
+| `python -m src.train.baselines` | Compare simpler/alternate models; writes `reports/ml/baseline_comparison.csv`. |
+| `python -m src.train.threshold_tuning` | Sweep fraud thresholds; writes threshold study CSV + optional `models/thresholds.json`. |
+| `python -m src.train.error_analysis` | Export misclassification samples for inspection. |
+| `python -m src.train.drift_monitor` | Compare train vs holdout (or configured splits); writes drift JSON for the dashboard. |
+
+These were added so evaluation is **interpretable and realistic**: baselines show uplift
+over naive choices, threshold tuning surfaces precision/recall tradeoffs, error exports
+support qualitative review, and drift summarizes distribution shift—together with the
+dashboard and the rule-based explanation layer on `/predict`.
+
+`python -m src.train.error_analysis` expects **trained** `models/*.joblib` artifacts in addition
+to Parquet splits (it loads the same pipelines as serving).
+
+## Synthetic data generation
+
+The proposal references a large public dataset. The generator (`src/ingest/generate_sample.py`)
+produces Amazon-shaped **JSONL** locally so the full pipeline runs without a multi-GB download.
+Phrase pools are sentiment-stratified; a configurable share of rows simulate fraud-like
+patterns (e.g. duplicate bursts, velocity effects, reviewer rings, hard negatives). Large
+runs: e.g. `--rows 1000000`; Spark scales with data size.
+
+**Difficulty (`easy` \| `medium` \| `hard`):**
+
+- **`medium` is the default** (`make ingest`, pipeline scripts unless overridden).
+- **`easy`** — cleaner separation between classes; closer to a simplified legacy mix.
+- **`medium`** — cross-class phrase overlap, typos/punctuation noise, mixed-sentiment wording,
+  richer fraud mixture.
+- **`hard`** — stronger overlap and subtler fraud-like patterns so models face a tougher task.
+
+Harder modes increase realism for **sentiment confusion** and **fraud subtlety** while keeping
+the **JSONL schema and downstream column layout unchanged**.
 
 Examples:
 
 ```bash
 python -m src.ingest.generate_sample --rows 30000 --fraud-share 0.06 --difficulty hard
-make ingest   # Makefile uses medium by default
+make ingest   # uses medium by default
 ROWS=50000 DIFFICULTY=easy bash scripts/run_pipeline.sh
 ```
+
+## Results and interpretation
+
+Metrics on **synthetic** data are for development and apples-to-apples comparisons—not a claim
+of production accuracy. With **`medium`/`hard`** difficulty, holdout curves are **more
+informative**: fraud threshold sweeps show clearer precision/recall tradeoffs than an
+everywhere-easy generator, and sentiment/fraud error analysis becomes more meaningful.
+
+The **dashboard + drift + explanation** pieces are meant for monitoring and transparency:
+they do not replace rigorous evaluation on real Amazon data, but they make the current run
+easier to interpret than headline numbers alone.
 
 ## Tests
 

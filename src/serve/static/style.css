@@ -460,3 +460,60 @@ table.ml-table.ml-table-compact td {
   color: var(--muted);
   font-weight: 600;
 }
+
+/* Rule-based fraud explanation (Score a review) */
+.fraud-explain-wrap {
+  margin-top: 14px;
+}
+.fraud-explain-panel {
+  background: #0b0f14;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 13px;
+}
+.fraud-explain-panel.fraud-explain-na {
+  color: var(--muted);
+  font-style: italic;
+}
+.fraud-explain-head {
+  margin-bottom: 10px;
+}
+.risk-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.risk-badge.risk-low {
+  background: rgba(46, 160, 67, 0.2);
+  color: #3fb950;
+  border: 1px solid rgba(46, 160, 67, 0.45);
+}
+.risk-badge.risk-medium {
+  background: rgba(255, 153, 0, 0.15);
+  color: #ffa657;
+  border: 1px solid rgba(255, 153, 0, 0.4);
+}
+.risk-badge.risk-high {
+  background: rgba(248, 81, 73, 0.18);
+  color: #ff7b72;
+  border: 1px solid rgba(248, 81, 73, 0.45);
+}
+.fraud-explain-summary {
+  margin: 0 0 10px;
+  color: var(--fg);
+  line-height: 1.45;
+}
+ul.fraud-reasons {
+  margin: 0;
+  padding-left: 1.25rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+ul.fraud-reasons li {
+  margin-bottom: 6px;
+}
