@@ -205,6 +205,8 @@ API above. It includes:
   `meta.json -> selection.fraud_model_name`. Weak fraud labels come from batch heuristics
   in ETL. The API returns **probabilities**; optional threshold tuning writes
   `models/thresholds.json` for analysis and dashboard use.
+  Current selected fraud model in this repo's latest trained artifacts:
+  **`gbt+tfidf+behavior`**.
 
 Both runs log to MLflow under experiment `amazon_reviews_sentiment_fraud`.
 
