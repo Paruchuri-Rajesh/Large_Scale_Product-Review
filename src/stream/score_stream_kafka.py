@@ -1,17 +1,4 @@
-"""Spark Structured Streaming scorer — Kafka source.
-Reads JSON review messages from a Kafka topic, scores sentiment + fraud
-via foreachBatch, and writes results to data/streaming_out/scored/.
-
-Requires the Spark-Kafka connector jar. Start with:
-    spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0 \
-        -m src.stream.score_stream_kafka
-
-Or via the Makefile:
-    make stream-kafka
-
-Run the producer in a second terminal:
-    python -m scripts.kafka_producer
-"""
+"""Spark Structured Streaming scorer — Kafka source."""
 from __future__ import annotations
 import argparse
 import json
@@ -23,21 +10,42 @@ import pandas as pd
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from pyspark.sql import DataFrame, functions as F  # noqa: E402
-from pyspark.sql.types import StringType  # noqa: E402
+from pyspark.sql import DataFrame, functions as F
+from pyspark.sql.types import StringType
 
-from src.common.config import (  # noqa: E402
-    FRAUD_MODEL_PATH,
-    SENTIMENT_LABELS,
-    SENTIMENT_MODEL_PATH,
-    STREAM_OUT_DIR,
-    ensure_dirs,
+from src.common.config import (
+    FRAUD_MODEL_PATH, SENTIMENT_LABELS, SENTIMENT_MODEL_PATH,
+    STREAM_OUT_DIR, ensure_dirs,
 )
-from src.common.spark import get_spark  # noqa: E402
-from src.common.text import enrich_for_serving as _enrich_for_serving  # noqa: E402
-from src.train.features import get_fraud_numeric_features  # noqa: E402
+from src.common.spark import get_spark
+from src.common.text import clean_text
+from src.train.features import get_fraud_numeric_features
 
 NUMERIC_FRAUD_FEATURES = get_fraud_numeric_features()
+
+
+def _enrich(pdf: pd.DataFrame) -> pd.DataFrame:
+    out = pdf.copy()
+    body = out.get("review_body", pd.Series([], dtype=str)).fillna("").astype(str)
+    out["review_body_clean"] = body.apply(clean_text)
+    out["body_len"] = out["review_body_clean"].str.len().astype(int)
+    out["body_word_count"] = out["review_body_clean"].str.split().map(len).astype(int)
+    out["exclam_count"] = body.str.count("!").astype(int)
+    out["verified_purchase_int"] = out.get("verified_purchase", pd.Series([False]*len(out))).fillna(False).astype(int)
+    out["star_rating"] = pd.to_numeric(out.get("star_rating", pd.Series([3]*len(out))), errors="coerce").fillna(3).astype(int)
+    out["helpful_votes"] = pd.to_numeric(out.get("helpful_votes", pd.Series([0]*len(out))), errors="coerce").fillna(0).astype(int)
+    out["total_votes"] = pd.to_numeric(out.get("total_votes", pd.Series([0]*len(out))), errors="coerce").fillna(0).astype(int)
+    out["reviewer_review_count"] = 1
+    out["reviewer_avg_rating"] = out["star_rating"].astype(float)
+    out["reviewer_pct_5star"] = (out["star_rating"] == 5).astype(float)
+    out["reviewer_distinct_products"] = 1
+    out["reviewer_reviews_same_day"] = 1
+    out["reviewer_verified_share"] = out["verified_purchase_int"].astype(float)
+    out["product_review_count"] = 1
+    out["product_avg_rating"] = out["star_rating"].astype(float)
+    out["product_pct_5star"] = (out["star_rating"] == 5).astype(float)
+    out["dup_in_product"] = 1
+    return out
 
 
 def main() -> None:
@@ -60,7 +68,6 @@ def main() -> None:
     sentiment = joblib.load(SENTIMENT_MODEL_PATH)
     fraud = joblib.load(FRAUD_MODEL_PATH)
 
-    # Read raw JSON strings from Kafka
     kafka_df = (
         spark.readStream.format("kafka")
         .option("kafka.bootstrap.servers", args.broker)
@@ -69,16 +76,11 @@ def main() -> None:
         .load()
     )
 
-    # Kafka value is bytes → cast to string
-    reviews_df = kafka_df.select(
-        F.cast(F.col("value"), StringType()).alias("raw_json")
-    )
+    reviews_df = kafka_df.select(F.col("value").cast(StringType()).alias("raw_json"))
 
     def score_and_write(batch_df: DataFrame, batch_id: int) -> None:
         if batch_df.rdd.isEmpty():
             return
-
-        # Parse JSON strings into dicts
         raw_rows = [row["raw_json"] for row in batch_df.collect()]
         records = []
         for r in raw_rows:
@@ -86,13 +88,11 @@ def main() -> None:
                 records.append(json.loads(r))
             except Exception:
                 continue
-
         if not records:
             return
 
         pdf = pd.DataFrame(records)
-        feats = _enrich_for_serving(pdf)
-
+        feats = _enrich(pdf)
         sent_label = sentiment.predict(feats["review_body_clean"]).astype(int)
         feat_cols = ["review_body_clean"] + NUMERIC_FRAUD_FEATURES
         fraud_proba = fraud.predict_proba(feats[feat_cols])[:, 1]
@@ -113,11 +113,7 @@ def main() -> None:
         })
 
         print(f"\n[kafka-stream batch {batch_id}] {len(out)} rows scored")
-        print(
-            out[["review_id", "product_id", "star_rating", "sentiment", "fraud_proba", "fraud_flag"]]
-            .head(5)
-            .to_string(index=False)
-        )
+        print(out[["review_id", "star_rating", "sentiment", "fraud_proba", "fraud_flag"]].head(5).to_string(index=False))
 
         out_path = out_scored / f"kafka-batch-{batch_id:08d}.json"
         out.to_json(out_path, orient="records", lines=True)

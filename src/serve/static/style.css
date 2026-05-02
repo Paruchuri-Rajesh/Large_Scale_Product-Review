@@ -517,3 +517,33 @@ ul.fraud-reasons {
 ul.fraud-reasons li {
   margin-bottom: 6px;
 }
+
+/* Audit + LLM sections */
+.audit-result { margin-top: 16px; }
+.audit-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.badge { padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+.audit-report {
+  background: #f8f9fa;
+  border-left: 3px solid #2c3e50;
+  padding: 14px 16px;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+#audit-product-id { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+
+/* Audit + LLM sections */
+.audit-result { margin-top: 16px; }
+.audit-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.badge { padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+.audit-report {
+  background: #f8f9fa;
+  border-left: 3px solid #2c3e50;
+  padding: 14px 16px;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+#audit-product-id { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }

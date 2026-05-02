@@ -58,3 +58,26 @@ clean:
 	rm -rf data/raw/* data/processed/* data/streaming_in/* data/streaming_out/*
 	rm -rf models/*.joblib models/meta.json
 	rm -rf mlruns/*
+
+
+kafka-produce:
+	python -m scripts.kafka_producer
+
+stream-kafka:
+	PYSPARK_SUBMIT_ARGS='--packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0 pyspark-shell' python -m src.stream.score_stream_kafka
+
+kafka-start:
+	brew services start kafka
+
+kafka-stop:
+	brew services stop kafka
+
+kafka-topics:
+	kafka-topics --bootstrap-server localhost:9092 --list
+
+mcp:
+	python -m src.serve.mcp_server
+
+audit:
+	@echo "Usage: make audit PRODUCT=<product_id>"
+	python -m src.agents.review_auditor --product-id $(PRODUCT)

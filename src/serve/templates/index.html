@@ -1,104 +1,322 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<title>Amazon Reviews — Sentiment & Fraud</title>
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<link rel="stylesheet" href="/static/style.css" />
+<meta charset="utf-8"/>
+<title>FraudLens · Amazon Review Intelligence</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<style>
+:root{--bg:#0a0c10;--surface:#111318;--surface2:#1a1d24;--surface3:#22262f;--border:rgba(255,255,255,0.07);--accent:#00e5a0;--accent2:#ff4d6d;--accent3:#7b61ff;--text:#e8eaf0;--muted:#6b7280;--mono:'Space Mono',monospace;--sans:'DM Sans',sans-serif}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.6;min-height:100vh}
+body::before{content:'';position:fixed;inset:0;background-image:radial-gradient(circle at 20% 20%,rgba(0,229,160,0.04) 0%,transparent 50%),radial-gradient(circle at 80% 80%,rgba(123,97,255,0.04) 0%,transparent 50%);pointer-events:none;z-index:0}
+.shell{display:grid;grid-template-columns:220px 1fr;min-height:100vh;position:relative;z-index:1}
+.sidebar{background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
+.logo{padding:24px 20px 20px;border-bottom:1px solid var(--border)}
+.logo-mark{font-family:var(--mono);font-size:18px;font-weight:700;color:var(--accent)}
+.logo-sub{font-size:10px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;margin-top:2px}
+.nav{flex:1;padding:16px 0}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 20px;cursor:pointer;border-left:2px solid transparent;transition:all .15s;color:var(--muted);font-size:13px;font-weight:500}
+.nav-item:hover{color:var(--text);background:var(--surface2)}
+.nav-item.active{color:var(--accent);border-left-color:var(--accent);background:rgba(0,229,160,0.06)}
+.nav-dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0}
+.nav-badge{margin-left:auto;font-family:var(--mono);font-size:10px;background:rgba(0,229,160,0.15);color:var(--accent);padding:2px 6px;border-radius:4px}
+.sidebar-footer{padding:16px 20px;border-top:1px solid var(--border);font-size:11px;color:var(--muted)}
+.status-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-right:6px;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.main{overflow-y:auto;height:100vh}
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10}
+.page-title{font-family:var(--mono);font-size:13px;color:var(--muted);letter-spacing:1px;text-transform:uppercase}
+.topbar-right{display:flex;gap:8px;align-items:center}
+.pill{font-family:var(--mono);font-size:11px;padding:4px 10px;border-radius:20px;border:1px solid var(--border);color:var(--muted)}
+.pill.green{border-color:rgba(0,229,160,0.3);color:var(--accent);background:rgba(0,229,160,0.06)}
+.content{padding:24px 28px;display:none}
+.content.active{display:block}
+.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 18px;position:relative;overflow:hidden}
+.kpi::after{content:'';position:absolute;top:0;left:0;right:0;height:2px}
+.kpi.green::after{background:var(--accent)}.kpi.red::after{background:var(--accent2)}.kpi.purple::after{background:var(--accent3)}.kpi.gray::after{background:#444}
+.kpi-label{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);margin-bottom:6px}
+.kpi-value{font-family:var(--mono);font-size:22px;font-weight:700}
+.kpi-sub{font-size:11px;color:var(--muted);margin-top:4px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;margin-bottom:20px;overflow:hidden}
+.card-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.card-title{font-family:var(--mono);font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+.card-body{padding:20px}
+textarea,input[type=text],select{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-family:var(--sans);font-size:14px;outline:none;transition:border .15s;resize:vertical}
+textarea:focus,input[type=text]:focus,select:focus{border-color:rgba(0,229,160,0.4)}
+.form-row{display:flex;gap:12px;align-items:flex-end;margin-top:12px;flex-wrap:wrap}
+.form-group{display:flex;flex-direction:column;gap:6px}
+.form-group label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+.btn{padding:10px 20px;border-radius:8px;border:none;cursor:pointer;font-family:var(--sans);font-size:13px;font-weight:600;transition:all .15s;white-space:nowrap}
+.btn-primary{background:var(--accent);color:#0a0c10}.btn-primary:hover{background:#00ffb3;transform:translateY(-1px)}.btn-primary:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text)}.btn-ghost:hover{border-color:rgba(255,255,255,0.2);background:var(--surface2)}
+.score-result{margin-top:16px;display:none}
+.result-badges{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.badge{font-family:var(--mono);font-size:11px;padding:5px 12px;border-radius:6px;font-weight:700}
+.badge-green{background:rgba(0,229,160,0.15);color:var(--accent);border:1px solid rgba(0,229,160,0.3)}
+.badge-red{background:rgba(255,77,109,0.15);color:var(--accent2);border:1px solid rgba(255,77,109,0.3)}
+.badge-purple{background:rgba(123,97,255,0.15);color:var(--accent3);border:1px solid rgba(123,97,255,0.3)}
+.badge-gray{background:rgba(255,255,255,0.06);color:var(--muted);border:1px solid var(--border)}
+.explain-box{background:var(--surface2);border-left:3px solid var(--accent);border-radius:0 8px 8px 0;padding:14px 16px;font-size:13px;line-height:1.7}
+.explain-box.risk-high{border-left-color:var(--accent2)}.explain-box.risk-medium{border-left-color:#f59e0b}
+.audit-input-row{display:flex;gap:10px}.audit-input-row input{flex:1}
+.audit-status{font-size:12px;color:var(--muted);margin-top:10px;font-family:var(--mono)}
+.audit-report{background:var(--surface2);border-radius:8px;padding:20px;margin-top:16px;display:none;font-size:13px;line-height:1.9}
+.typing-wrap{display:flex;gap:4px;align-items:center;padding:8px 0}
+.typing-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);animation:typing .8s infinite}
+.typing-dot:nth-child(2){animation-delay:.15s}.typing-dot:nth-child(3){animation-delay:.3s}
+@keyframes typing{0%,100%{opacity:.3;transform:translateY(0)}50%{opacity:1;transform:translateY(-3px)}}
+.data-table{width:100%;border-collapse:collapse;font-size:13px}
+.data-table th{text-align:left;padding:10px 12px;font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);border-bottom:1px solid var(--border);font-weight:400}
+.data-table td{padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.04)}
+.data-table tr:hover td{background:rgba(255,255,255,0.02)}
+.fraud-bar{height:4px;border-radius:2px;background:var(--surface3);margin-top:4px;overflow:hidden}
+.fraud-bar-fill{height:100%;border-radius:2px}
+.mono{font-family:var(--mono);font-size:12px}
+.tag{font-size:10px;padding:2px 8px;border-radius:4px;font-weight:600;font-family:var(--mono)}
+.tag-pos{background:rgba(0,229,160,0.12);color:var(--accent)}.tag-neg{background:rgba(255,77,109,0.12);color:var(--accent2)}.tag-neu{background:rgba(255,255,255,0.06);color:var(--muted)}
+.live-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:pulse 1.5s infinite;flex-shrink:0}
+.products-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
+.product-card{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:16px;cursor:pointer;transition:all .15s}
+.product-card:hover{border-color:rgba(0,229,160,0.3);transform:translateY(-2px)}
+.product-card.high-fraud{border-color:rgba(255,77,109,0.2)}
+.pc-id{font-family:var(--mono);font-size:13px;font-weight:700;margin-bottom:4px}
+.pc-cat{font-size:11px;color:var(--muted);margin-bottom:10px}
+.pc-stats{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.pc-stat-label{font-size:10px;color:var(--muted)}
+.pc-stat-value{font-family:var(--mono);font-size:13px;font-weight:700}
+.pc-stat-value.danger{color:var(--accent2)}.pc-stat-value.good{color:var(--accent)}
+.pc-fraud-bar{height:3px;background:var(--surface3);border-radius:2px;margin-top:10px;overflow:hidden}
+.pc-fraud-fill{height:100%;border-radius:2px}
+</style>
 </head>
 <body>
-<header>
-  <h1>Amazon Reviews · Sentiment &amp; Fraud</h1>
-  <p class="sub">Spark batch + streaming · MLflow-tracked models · FastAPI service</p>
-</header>
+<div class="shell">
+<aside class="sidebar">
+  <div class="logo">
+    <div class="logo-mark">FraudLens</div>
+    <div class="logo-sub">Review Intelligence</div>
+  </div>
+  <nav class="nav">
+    <div class="nav-item active" onclick="showPage('overview')"><span class="nav-dot"></span>Overview</div>
+    <div class="nav-item" onclick="showPage('score')"><span class="nav-dot"></span>Score a Review<span class="nav-badge">LLM</span></div>
+    <div class="nav-item" onclick="showPage('audit')"><span class="nav-dot"></span>Agent Auditor<span class="nav-badge">AI</span></div>
+    <div class="nav-item" onclick="showPage('products')"><span class="nav-dot"></span>Products</div>
+    <div class="nav-item" onclick="showPage('reviewers')"><span class="nav-dot"></span>Suspicious Reviewers</div>
+    <div class="nav-item" onclick="showPage('stream')"><span class="nav-dot"></span>Live Stream</div>
+  </nav>
+  <div class="sidebar-footer"><span class="status-dot"></span>API connected · :8000</div>
+</aside>
+<div class="main">
+  <div class="topbar">
+    <div class="page-title" id="page-title">Overview</div>
+    <div class="topbar-right">
+      <span class="pill green">Models loaded</span>
+      <span class="pill" id="stream-count">— stream rows</span>
+    </div>
+  </div>
 
-<main>
-  <section class="card ml-overview">
-    <h2>ML overview</h2>
-    <p class="hint">Training splits, baseline winners from full comparison CSV, serving threshold, and ROC-AUC — all from <code>/metadata</code>.</p>
-    <div id="ml-overview-kpis" class="kpi-grid"></div>
-  </section>
-
-  <section class="card">
-    <h2>1. Score a review</h2>
-    <p class="hint">Type any review text. The sentiment model predicts negative/neutral/positive; the fraud model returns a probability.</p>
-    <form id="score-form">
-      <textarea id="body" rows="4" placeholder="e.g. This product completely changed my life, I bought 100 of them, 5 stars all the way!" required></textarea>
-      <div class="row">
-        <label>Star rating
-          <select id="star">
-            <option value="">(none)</option>
-            <option>1</option><option>2</option><option>3</option><option>4</option><option selected>5</option>
-          </select>
-        </label>
-        <label>Verified purchase
-          <select id="verified">
-            <option value="true">true</option>
-            <option value="false">false</option>
-          </select>
-        </label>
-        <button type="submit">Score</button>
+  <div class="content active" id="page-overview">
+    <div class="kpi-row">
+      <div class="kpi green"><div class="kpi-label">Train rows</div><div class="kpi-value" id="kpi-train">—</div><div class="kpi-sub">80% split</div></div>
+      <div class="kpi gray"><div class="kpi-label">Test rows</div><div class="kpi-value" id="kpi-test">—</div><div class="kpi-sub">20% holdout</div></div>
+      <div class="kpi purple"><div class="kpi-label">Fraud ROC-AUC</div><div class="kpi-value" id="kpi-auc">—</div><div class="kpi-sub">GBT model</div></div>
+      <div class="kpi red"><div class="kpi-label">Fraud threshold</div><div class="kpi-value" id="kpi-thresh">—</div><div class="kpi-sub">decision cutoff</div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="card-title">Top products by fraud rate</span></div>
+      <div class="card-body" style="padding:0">
+        <table class="data-table" id="overview-products">
+          <thead><tr><th>Product</th><th>Category</th><th>Reviews</th><th>Avg ★</th><th>Fraud rate</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
       </div>
-    </form>
-    <div id="score-explanation" class="fraud-explain-wrap" aria-live="polite"></div>
-    <pre id="score-out" class="out"></pre>
-  </section>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="card-title">Recent stream activity</span></div>
+      <div class="card-body" style="padding:0">
+        <table class="data-table" id="overview-stream">
+          <thead><tr><th>Review ID</th><th>Product</th><th>★</th><th>Sentiment</th><th>Fraud prob</th><th>Flag</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 
-  <section class="card">
-    <h2>2. Top products (batch ETL)</h2>
-    <p class="hint">Aggregations produced by the Spark batch job (<code>data/processed/product_agg.parquet</code>).</p>
-    <table id="products-table"><thead>
-      <tr><th>Product</th><th>Category</th><th>#reviews</th><th>avg★</th><th>%5★</th><th>fraud rate</th></tr>
-    </thead><tbody></tbody></table>
-  </section>
+  <div class="content" id="page-score">
+    <div class="card">
+      <div class="card-header"><span class="card-title">Score a review · LLM explanation</span></div>
+      <div class="card-body">
+        <div class="form-group" style="width:100%">
+          <label>Review text</label>
+          <textarea id="score-body" rows="5" placeholder="Paste any review text here..."></textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Star rating</label><select id="score-star" style="width:100px"><option>1</option><option>2</option><option>3</option><option>4</option><option selected>5</option></select></div>
+          <div class="form-group"><label>Verified</label><select id="score-verified" style="width:100px"><option value="true">Yes</option><option value="false">No</option></select></div>
+          <button class="btn btn-primary" onclick="scoreReview()" id="score-btn">Analyze</button>
+        </div>
+        <div class="score-result" id="score-result">
+          <div class="result-badges" id="score-badges"></div>
+          <div class="explain-box" id="score-explain"></div>
+        </div>
+      </div>
+    </div>
+  </div>
 
-  <section class="card">
-    <h2>3. Suspicious reviewers</h2>
-    <p class="hint">Reviewers ranked by fraud_rate from the ETL output.</p>
-    <table id="reviewers-table"><thead>
-      <tr><th>Reviewer</th><th>#reviews</th><th>avg★</th><th>fraud rate</th><th>%verified</th></tr>
-    </thead><tbody></tbody></table>
-  </section>
+  <div class="content" id="page-audit">
+    <div class="card">
+      <div class="card-header"><span class="card-title">Agentic product auditor · Ollama llama3.2</span></div>
+      <div class="card-body">
+        <p style="color:var(--muted);font-size:13px;margin-bottom:14px">The LLM agent fetches product stats, reviews, and fraud signals then writes a full audit report. Takes ~30-60s.</p>
+        <div class="audit-input-row">
+          <input type="text" id="audit-pid" placeholder="Enter product ID, e.g. P2012"/>
+          <button class="btn btn-primary" onclick="runAudit()" id="audit-btn">Run audit</button>
+        </div>
+        <div class="audit-status" id="audit-status"></div>
+        <div class="audit-report" id="audit-report"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="card-title">High fraud targets — click to audit</span></div>
+      <div class="card-body"><div id="quick-targets" style="display:flex;flex-wrap:wrap;gap:8px"></div></div>
+    </div>
+  </div>
 
-  <section class="card">
-    <h2>4. Streaming feed</h2>
-    <p class="hint">Most recent reviews scored by the Spark Structured Streaming job. Refreshes every 5s.</p>
-    <table id="stream-table"><thead>
-      <tr><th>review_id</th><th>product</th><th>★</th><th>sentiment</th><th>fraud p</th><th>flag</th></tr>
-    </thead><tbody></tbody></table>
-  </section>
+  <div class="content" id="page-products">
+    <div class="products-grid" id="products-grid"></div>
+  </div>
 
-  <section class="card">
-    <h2>5. Model metadata</h2>
-    <p class="hint">Key fields from <code>/metadata</code> (same payload as <code>models/meta.json</code>).</p>
-    <div id="meta-summary" class="meta-summary"></div>
-  </section>
+  <div class="content" id="page-reviewers">
+    <div class="card">
+      <div class="card-header"><span class="card-title">Suspicious reviewers · ranked by fraud rate</span></div>
+      <div class="card-body" style="padding:0">
+        <table class="data-table" id="reviewers-table">
+          <thead><tr><th>Reviewer ID</th><th>Reviews</th><th>Avg ★</th><th>% 5-star</th><th>Fraud rate</th><th>Verified share</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 
-  <section class="card ml-section">
-    <h2>6. Baseline comparison</h2>
-    <p class="hint">Summary uses full CSV via <code>best_*_baseline</code>; bar charts use <code>baseline_chart_series</code>; preview table is the same head rows as before.</p>
-    <div id="baseline-preview" class="ml-panel"></div>
-  </section>
+  <div class="content" id="page-stream">
+    <div class="card">
+      <div class="card-header">
+        <div style="display:flex;align-items:center;gap:8px"><span class="live-dot"></span><span class="card-title">Live scoring feed · refreshes every 5s</span></div>
+        <span class="pill green" id="stream-source">—</span>
+      </div>
+      <div class="card-body" style="padding:0">
+        <table class="data-table" id="stream-table">
+          <thead><tr><th>Review ID</th><th>Product</th><th>★</th><th>Sentiment</th><th>Fraud prob</th><th>Flag</th><th>Source</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+<script>
+const API='http://127.0.0.1:8000';
+const $=id=>document.getElementById(id);
+const pageOrder=['overview','score','audit','products','reviewers','stream'];
+const pageTitles={overview:'Overview',score:'Score a Review',audit:'Agent Auditor',products:'Products',reviewers:'Suspicious Reviewers',stream:'Live Stream'};
+function showPage(id){
+  document.querySelectorAll('.content').forEach(el=>el.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
+  $('page-'+id).classList.add('active');
+  document.querySelectorAll('.nav-item')[pageOrder.indexOf(id)].classList.add('active');
+  $('page-title').textContent=pageTitles[id];
+  if(id==='stream')loadStream();
+  if(id==='products')loadProducts();
+  if(id==='reviewers')loadReviewers();
+}
+async function get(url){const r=await fetch(API+url);if(!r.ok)throw new Error(r.statusText);return r.json();}
+async function post(url,body){const r=await fetch(API+url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw new Error(await r.text());return r.json();}
+const pct=x=>x==null?'—':(x*100).toFixed(1)+'%';
+const num=(x,d=2)=>x==null?'—':Number(x).toFixed(d);
+function fc(r){return r>=0.7?'#ff4d6d':r>=0.3?'#f59e0b':'#00e5a0';}
 
-  <section class="card ml-section">
-    <h2>7. Threshold study</h2>
-    <p class="hint">Chosen serving threshold, then metric curves vs threshold (preview sweep rows).</p>
-    <div id="threshold-preview" class="ml-panel"></div>
-  </section>
+async function loadOverview(){
+  try{const m=await get('/metadata');$('kpi-train').textContent=(m.n_train||m.train_rows||'—').toLocaleString();$('kpi-test').textContent=(m.n_test||m.test_rows||'—').toLocaleString();const auc=m.fraud_roc_auc??m.roc_auc;$('kpi-auc').textContent=auc?Number(auc).toFixed(4):'—';const t=m.selected_thresholds?.fraud??m.fraud_threshold??'0.50';$('kpi-thresh').textContent=Number(t).toFixed(2);}catch(e){}
+  try{
+    const products=await get('/aggregates/products?limit=50');
+    const sorted=[...products].sort((a,b)=>b.fraud_rate-a.fraud_rate).slice(0,8);
+    $('overview-products').querySelector('tbody').innerHTML=sorted.map(p=>`<tr><td class="mono">${p.product_id}</td><td style="color:var(--muted)">${p.product_category||'—'}</td><td class="mono">${p.review_count}</td><td class="mono">${num(p.avg_rating||p.product_avg_rating,2)}</td><td><span class="mono" style="color:${fc(p.fraud_rate)}">${pct(p.fraud_rate)}</span><div class="fraud-bar"><div class="fraud-bar-fill" style="width:${pct(p.fraud_rate)};background:${fc(p.fraud_rate)}"></div></div></td><td><button class="btn btn-ghost" style="padding:4px 10px;font-size:11px" onclick="quickAudit('${p.product_id}')">Audit</button></td></tr>`).join('');
+    $('quick-targets').innerHTML=products.filter(p=>p.fraud_rate>=0.5).slice(0,8).map(p=>`<button class="btn btn-ghost" style="font-family:var(--mono);font-size:12px" onclick="quickAudit('${p.product_id}')">${p.product_id} · ${pct(p.fraud_rate)}</button>`).join('');
+  }catch(e){}
+  try{const stream=await get('/stream/recent?limit=6');$('stream-count').textContent=stream.length+' stream rows';$('overview-stream').querySelector('tbody').innerHTML=stream.slice(-6).reverse().map(r=>`<tr><td class="mono" style="font-size:11px">${(r.review_id||'').slice(0,14)}…</td><td class="mono">${r.product_id||'—'}</td><td>${r.star_rating||'—'}</td><td><span class="tag tag-${r.sentiment==='positive'?'pos':r.sentiment==='negative'?'neg':'neu'}">${r.sentiment||'—'}</span></td><td class="mono" style="color:${fc(r.fraud_proba)}">${num(r.fraud_proba,3)}</td><td>${r.fraud_flag?'<span class="tag tag-neg">FLAGGED</span>':'<span class="tag tag-pos">clean</span>'}</td></tr>`).join('');}catch(e){}
+}
 
-  <section class="card ml-section">
-    <h2>8. Drift summary</h2>
-    <p class="hint">Population cards, ranked shift bars for top drift features, optional numeric detail.</p>
-    <div id="drift-summary" class="ml-panel"></div>
-  </section>
+async function scoreReview(){
+  const body=$('score-body').value.trim();if(!body)return;
+  const btn=$('score-btn');btn.disabled=true;btn.textContent='Analyzing…';$('score-result').style.display='none';
+  try{
+    const data=await post('/predict',{review_body:body,star_rating:parseInt($('score-star').value),verified_purchase:$('score-verified').value==='true'});
+    const ex=data.fraud_explanation||{};const risk=ex.risk_level||(data.fraud_flag?'high':'low');
+    const rb=risk==='high'?'badge-red':risk==='medium'?'badge-purple':'badge-green';
+    $('score-badges').innerHTML=`<span class="badge ${data.sentiment==='positive'?'badge-green':data.sentiment==='negative'?'badge-red':'badge-gray'}">${(data.sentiment||'').toUpperCase()}</span><span class="badge badge-purple">FRAUD ${(data.fraud_proba*100).toFixed(1)}%</span><span class="badge ${data.fraud_flag?'badge-red':'badge-green'}">${data.fraud_flag?'⚠ FLAGGED':'✓ CLEAN'}</span><span class="badge ${rb}">RISK: ${risk.toUpperCase()}</span>${ex.llm_generated?'<span class="badge badge-green">LLM ✦</span>':'<span class="badge badge-gray">RULE-BASED</span>'}`;
+    const el=$('score-explain');el.className=`explain-box risk-${risk}`;el.textContent=ex.summary||'No explanation.';$('score-result').style.display='block';
+  }catch(e){$('score-explain').textContent='Error: '+e.message;$('score-result').style.display='block';}
+  finally{btn.disabled=false;btn.textContent='Analyze';}
+}
 
-  <section class="card ml-section">
-    <h2>9. Selected thresholds</h2>
-    <p class="hint">Serving thresholds from <code>selected_thresholds</code> in <code>/metadata</code>.</p>
-    <div id="selected-thresholds" class="ml-panel"></div>
-  </section>
-</main>
+async function runAudit(pid){
+  const productId=pid||$('audit-pid').value.trim();if(!productId)return;
+  if(!pid)$('audit-pid').value=productId;showPage('audit');
+  const btn=$('audit-btn');btn.disabled=true;btn.textContent='Running…';
+  $('audit-status').innerHTML='<div class="typing-wrap"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>&nbsp;Agent reasoning over <strong style="color:var(--accent)">'+productId+'</strong>…';
+  $('audit-report').style.display='none';
+  try{
+    const data=await get('/audit/'+productId);
+    $('audit-status').innerHTML='<span style="color:var(--accent)">✓</span> Audit complete · '+productId;
+    const raw = data.report || 'No report.';
+    const formatted = raw
+      .replace(/(PRODUCT SUMMARY|FRAUD SIGNALS|RISK VERDICT|RECOMMENDATIONS|Audit Report:?)/gi,
+        '<strong style="color:#00e5a0;font-family:Space Mono,monospace;font-size:11px;letter-spacing:1px;display:block;margin-top:18px;margin-bottom:4px;border-bottom:1px solid rgba(0,229,160,0.2);padding-bottom:4px">$1</strong>')
+      .replace(/\*\*(.*?)\*\*/g, '<strong style="color:#00e5a0">$1</strong>')
+      .replace(/
+\*/g, '<br>• ')
+      .replace(/
+\+/g, '<br>&nbsp;&nbsp;◦ ')
+      .replace(/
+/g, '<br>');
+    $('audit-report').innerHTML = formatted;
+    const formatted = raw
+      .replace(/(PRODUCT SUMMARY|FRAUD SIGNALS|RISK VERDICT|RECOMMENDATIONS|Audit Report:?)/gi,
+        '<strong style="color:#00e5a0;font-family:Space Mono,monospace;font-size:11px;letter-spacing:1px;display:block;margin-top:18px;margin-bottom:4px;border-bottom:1px solid rgba(0,229,160,0.2);padding-bottom:4px">$1</strong>')
+      .replace(/\*\*(.*?)\*\*/g, '<strong style="color:#00e5a0">$1</strong>')
+      .replace(/
+\*/g, '<br>• ')
+      .replace(/
+\+/g, '<br>&nbsp;&nbsp;◦ ')
+      .replace(/
+/g, '<br>');
+    $('audit-report').innerHTML = formatted;
+    $('audit-report').style.display='block';
+  }catch(e){$('audit-status').innerHTML='<span style="color:var(--accent2)">Error: '+e.message+'</span>';}
+  finally{btn.disabled=false;btn.textContent='Run audit';}
+}
+function quickAudit(pid){runAudit(pid);}
 
-<script src="/static/app.js"></script>
+async function loadProducts(){
+  const grid=$('products-grid');grid.innerHTML='<div style="height:120px;background:var(--surface2);border-radius:10px;animation:pulse 1.5s infinite"></div>'.repeat(8);
+  try{
+    const products=await get('/aggregates/products?limit=50');
+    grid.innerHTML=products.map(p=>{const fr=p.fraud_rate||0;return `<div class="product-card ${fr>=0.5?'high-fraud':''}" onclick="quickAudit('${p.product_id}')"><div class="pc-id">${p.product_id}</div><div class="pc-cat">${p.product_category||'—'}</div><div class="pc-stats"><div><div class="pc-stat-label">Reviews</div><div class="pc-stat-value">${p.review_count}</div></div><div><div class="pc-stat-label">Avg ★</div><div class="pc-stat-value">${num(p.avg_rating||p.product_avg_rating,2)}</div></div><div><div class="pc-stat-label">% 5-star</div><div class="pc-stat-value">${pct(p.pct_5star||p.product_pct_5star)}</div></div><div><div class="pc-stat-label">Fraud rate</div><div class="pc-stat-value ${fr>=0.5?'danger':'good'}">${pct(fr)}</div></div></div><div class="pc-fraud-bar"><div class="pc-fraud-fill" style="width:${pct(fr)};background:${fc(fr)}"></div></div></div>`;}).join('');
+  }catch(e){grid.innerHTML='<p style="color:var(--accent2)">Error: '+e.message+'</p>';}
+}
+
+async function loadReviewers(){
+  try{const reviewers=await get('/aggregates/fraud-reviewers?limit=50');$('reviewers-table').querySelector('tbody').innerHTML=reviewers.map(r=>`<tr><td class="mono">${r.reviewer_id}</td><td class="mono">${r.review_count}</td><td class="mono">${num(r.reviewer_avg_rating,2)}</td><td class="mono">${pct(r.reviewer_pct_5star)}</td><td><span class="mono" style="color:${fc(r.fraud_rate)}">${pct(r.fraud_rate)}</span><div class="fraud-bar"><div class="fraud-bar-fill" style="width:${pct(r.fraud_rate)};background:${fc(r.fraud_rate)}"></div></div></td><td class="mono">${pct(r.reviewer_verified_share)}</td></tr>`).join('');}catch(e){}
+}
+
+async function loadStream(){
+  try{const rows=await get('/stream/recent?limit=50');$('stream-count').textContent=rows.length+' stream rows';const sources=[...new Set(rows.map(r=>r.source).filter(Boolean))];$('stream-source').textContent=sources.join(' + ')||'file';$('stream-table').querySelector('tbody').innerHTML=[...rows].reverse().map(r=>`<tr><td class="mono" style="font-size:11px">${(r.review_id||'').slice(0,14)}…</td><td class="mono">${r.product_id||'—'}</td><td>${r.star_rating||'—'}</td><td><span class="tag tag-${r.sentiment==='positive'?'pos':r.sentiment==='negative'?'neg':'neu'}">${r.sentiment||'—'}</span></td><td class="mono" style="color:${fc(r.fraud_proba)}">${num(r.fraud_proba,4)}</td><td>${r.fraud_flag?'<span class="tag tag-neg">FLAGGED</span>':'<span class="tag tag-pos">clean</span>'}</td><td class="mono" style="font-size:10px;color:var(--muted)">${r.source||'file'}</td></tr>`).join('');}catch(e){}
+}
+
+loadOverview();loadProducts();
+setInterval(loadStream,5000);setInterval(loadOverview,15000);
+</script>
 </body>
 </html>
