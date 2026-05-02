@@ -35,7 +35,10 @@ from src.common.config import (  # noqa: E402
 )
 from src.common.schema import REVIEW_SCHEMA  # noqa: E402
 from src.common.spark import get_spark  # noqa: E402
-from src.train.train import NUMERIC_FRAUD_FEATURES  # noqa: E402
+# Same feature column order as batch training so foreachBatch scoring matches API.
+from src.train.features import get_fraud_numeric_features  # noqa: E402
+
+NUMERIC_FRAUD_FEATURES = get_fraud_numeric_features()
 
 
 def _enrich_for_serving(pdf: pd.DataFrame) -> pd.DataFrame:

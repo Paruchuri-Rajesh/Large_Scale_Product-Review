@@ -1,4 +1,8 @@
+# Use project venv when present (avoids conda/system python missing pytest).
 PY ?= python3
+ifneq ($(wildcard $(CURDIR)/.venv/bin/python),)
+  PY := $(CURDIR)/.venv/bin/python
+endif
 PORT ?= 8000
 
 .PHONY: help install ingest etl train stream-once stream feed serve mlflow-ui test clean all
@@ -22,7 +26,7 @@ install:
 	$(PY) -m pip install -r requirements.txt
 
 ingest:
-	$(PY) -m src.ingest.generate_sample --rows 30000 --fraud-share 0.06
+	$(PY) -m src.ingest.generate_sample --rows 30000 --fraud-share 0.06 --difficulty medium
 
 etl:
 	$(PY) -m src.etl.batch_etl

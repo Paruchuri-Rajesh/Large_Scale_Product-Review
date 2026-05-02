@@ -40,35 +40,33 @@ from sklearn.preprocessing import StandardScaler
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.common.config import (  # noqa: E402
+    BASELINE_REPORT_PATH,
     FRAUD_MODEL_PATH,
     META_PATH,
     MLFLOW_EXPERIMENT,
     MLFLOW_TRACKING_URI,
     SENTIMENT_MODEL_PATH,
     TEST_PARQUET,
+    THRESHOLD_REPORT_PATH,
+    THRESHOLDS_PATH,
     TRAIN_PARQUET,
     ensure_dirs,
 )
+from src.train.features import (  # noqa: E402
+    FRAUD_NUMERIC_FEATURES,
+    get_fraud_numeric_features,
+)
+from src.train.registry import load_json_optional  # noqa: E402
 
-NUMERIC_FRAUD_FEATURES = [
-    "body_len",
-    "body_word_count",
-    "exclam_count",
-    "helpful_votes",
-    "total_votes",
-    "reviewer_review_count",
-    "reviewer_avg_rating",
-    "reviewer_pct_5star",
-    "reviewer_distinct_products",
-    "reviewer_reviews_same_day",
-    "reviewer_verified_share",
-    "product_review_count",
-    "product_avg_rating",
-    "product_pct_5star",
-    "dup_in_product",
-    "verified_purchase_int",
-    "star_rating",
-]
+
+# Stable names aligned with MLflow params / proposal wording (for meta.json only).
+_SENTIMENT_MODEL_NAME = "logreg+tfidf"
+_FRAUD_MODEL_NAME = "gbt+tfidf+behavior"
+
+
+def _artifact_path_or_null(path: Path) -> str | None:
+    """Resolved path string if the file exists, else None (optional reports)."""
+    return str(path.resolve()) if path.exists() else None
 
 
 def _read_parquet(path: Path) -> pd.DataFrame:
@@ -76,7 +74,7 @@ def _read_parquet(path: Path) -> pd.DataFrame:
     df = pd.read_parquet(path)
     df["verified_purchase_int"] = df["verified_purchase"].fillna(False).astype(int)
     df["review_body_clean"] = df["review_body_clean"].fillna("")
-    for c in NUMERIC_FRAUD_FEATURES:
+    for c in FRAUD_NUMERIC_FEATURES:
         if c not in df.columns:
             continue
         df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
@@ -152,7 +150,7 @@ def train_fraud(train: pd.DataFrame, test: pd.DataFrame) -> dict:
     pre = ColumnTransformer(
         [
             ("text", text_vec, "review_body_clean"),
-            ("num", StandardScaler(with_mean=False), NUMERIC_FRAUD_FEATURES),
+            ("num", StandardScaler(with_mean=False), get_fraud_numeric_features()),
         ]
     )
     pipe = Pipeline(
@@ -183,7 +181,7 @@ def train_fraud(train: pd.DataFrame, test: pd.DataFrame) -> dict:
                 "fraud_share_train": float(train["fraud_label"].mean()),
             }
         )
-        feat_cols = ["review_body_clean"] + NUMERIC_FRAUD_FEATURES
+        feat_cols = ["review_body_clean"] + get_fraud_numeric_features()
         pipe.fit(train[feat_cols], train["fraud_label"])
         proba = pipe.predict_proba(test[feat_cols])[:, 1]
         preds = (proba >= 0.5).astype(int)
@@ -239,10 +237,29 @@ def main() -> None:
         "n_test": int(len(test)),
         "sentiment": sentiment_metrics,
         "fraud": fraud_metrics,
-        "numeric_fraud_features": NUMERIC_FRAUD_FEATURES,
+        "numeric_fraud_features": get_fraud_numeric_features(),
+        "numeric_fraud_features_excluded_from_model": sorted(
+            set(FRAUD_NUMERIC_FEATURES) - set(get_fraud_numeric_features())
+        ),
+        "artifacts": {
+            "baseline_report_path": _artifact_path_or_null(BASELINE_REPORT_PATH),
+            "threshold_report_path": _artifact_path_or_null(THRESHOLD_REPORT_PATH),
+            "thresholds_path": _artifact_path_or_null(THRESHOLDS_PATH),
+        },
+        "selection": {
+            "sentiment_model_name": _SENTIMENT_MODEL_NAME,
+            "fraud_model_name": _FRAUD_MODEL_NAME,
+        },
+        "thresholds": load_json_optional(THRESHOLDS_PATH),
     }
     META_PATH.write_text(json.dumps(meta, indent=2))
     print(f"[train] wrote meta -> {META_PATH}")
+    print(
+        "[train] meta.json includes artifacts + selection + thresholds embed "
+        f"(baseline_csv={'yes' if BASELINE_REPORT_PATH.exists() else 'no'}, "
+        f"threshold_study_csv={'yes' if THRESHOLD_REPORT_PATH.exists() else 'no'}, "
+        f"thresholds_json={'yes' if THRESHOLDS_PATH.exists() else 'no'})"
+    )
 
 
 if __name__ == "__main__":

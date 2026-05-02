@@ -13,6 +13,12 @@
 </header>
 
 <main>
+  <section class="card ml-overview">
+    <h2>ML overview</h2>
+    <p class="hint">Training splits, baseline winners from full comparison CSV, serving threshold, and ROC-AUC — all from <code>/metadata</code>.</p>
+    <div id="ml-overview-kpis" class="kpi-grid"></div>
+  </section>
+
   <section class="card">
     <h2>1. Score a review</h2>
     <p class="hint">Type any review text. The sentiment model predicts negative/neutral/positive; the fraud model returns a probability.</p>
@@ -63,7 +69,32 @@
 
   <section class="card">
     <h2>5. Model metadata</h2>
-    <pre id="meta-out" class="out"></pre>
+    <p class="hint">Key fields from <code>/metadata</code> (same payload as <code>models/meta.json</code>).</p>
+    <div id="meta-summary" class="meta-summary"></div>
+  </section>
+
+  <section class="card ml-section">
+    <h2>6. Baseline comparison</h2>
+    <p class="hint">Summary uses full CSV via <code>best_*_baseline</code>; bar charts use <code>baseline_chart_series</code>; preview table is the same head rows as before.</p>
+    <div id="baseline-preview" class="ml-panel"></div>
+  </section>
+
+  <section class="card ml-section">
+    <h2>7. Threshold study</h2>
+    <p class="hint">Chosen serving threshold, then metric curves vs threshold (preview sweep rows).</p>
+    <div id="threshold-preview" class="ml-panel"></div>
+  </section>
+
+  <section class="card ml-section">
+    <h2>8. Drift summary</h2>
+    <p class="hint">Population cards, ranked shift bars for top drift features, optional numeric detail.</p>
+    <div id="drift-summary" class="ml-panel"></div>
+  </section>
+
+  <section class="card ml-section">
+    <h2>9. Selected thresholds</h2>
+    <p class="hint">Serving thresholds from <code>selected_thresholds</code> in <code>/metadata</code>.</p>
+    <div id="selected-thresholds" class="ml-panel"></div>
   </section>
 </main>
 
