@@ -5,7 +5,7 @@ ifneq ($(wildcard $(CURDIR)/.venv/bin/python),)
 endif
 PORT ?= 8000
 
-.PHONY: help install ingest etl train stream-once stream feed serve mlflow-ui test clean all
+.PHONY: help install ingest etl train stream-once stream feed serve streamlit mlflow-ui test clean all
 
 help:
 	@echo "Targets:"
@@ -17,6 +17,7 @@ help:
 	@echo "  stream      run streaming scorer continuously (Ctrl-C to stop)"
 	@echo "  feed        drip raw reviews into data/streaming_in"
 	@echo "  serve       run FastAPI on :$(PORT)"
+	@echo "  streamlit   run Streamlit demo dashboard on :8501"
 	@echo "  mlflow-ui   open MLflow tracking UI on :5000"
 	@echo "  test        run the unit + integration tests"
 	@echo "  all         ingest + etl + train"
@@ -45,6 +46,9 @@ feed:
 
 serve:
 	$(PY) -m uvicorn src.serve.app:app --host 0.0.0.0 --port $(PORT) --reload
+
+streamlit:
+	$(PY) -m streamlit run streamlit_app.py
 
 mlflow-ui:
 	$(PY) -m mlflow ui --backend-store-uri "file://$(CURDIR)/mlruns" --port 5000
