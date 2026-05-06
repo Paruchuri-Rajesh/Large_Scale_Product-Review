@@ -39,8 +39,12 @@ are unchanged from the proposal.
 | Sentiment model | OK -- TF-IDF + Logistic Regression (`saga` solver), MLflow-logged |
 | Fraud model | OK -- TF-IDF + behavioral features + Logistic Regression, MLflow-logged |
 | Streaming scorer (file source) | OK -- Spark Structured Streaming, foreachBatch |
-| Streaming scorer (Kafka source) | Code present, **not run this session** (no local broker) |
+| Streaming scorer (Kafka source) | OK -- broker started, topic + consumer + producer + scored output **verified end-to-end** |
 | FastAPI service + UI | OK -- 7 endpoints + dashboard, including LLM fraud explanation |
+| MCP server | OK -- `fastmcp` installed, 3 tools registered (`predict_review`, `get_fraud_reviewers`, `get_top_products`) |
+| LLM review auditor (Ollama) | OK -- agent ran on real ASIN `B01415QHYW` with `llama3.1:8b`, called 4 REST tools, produced a HIGH risk verdict |
+| Streamlit demo dashboard | OK -- 5-tab single-file app (`streamlit_app.py`) loads joblib + parquets directly |
+| Model diagnostics (drift / threshold / calibration / errors) | OK -- four analysis modules run on the 4.1 M-row holdout; reports under `reports/ml/` |
 | Tests | OK -- unit + integration |
 
 ---
@@ -330,10 +334,36 @@ serialization entirely. For very high throughput, the same logic lifts to a
 pandas UDF or a properly-broadcast joblib model.
 
 A drip-producer (`scripts/feed_stream.py`) and a Kafka producer
-(`scripts/kafka_producer.py`) are both available. **For this run we
-exercised the file-source streaming via `make stream-once` only; the Kafka
-path requires a running broker (`brew services start kafka` +
-`kafka-topics-create`) and was not exercised this session.**
+(`scripts/kafka_producer.py`) are both available.
+
+### Kafka end-to-end demo (verified this session)
+
+Both streaming paths were exercised:
+
+1. **File source** -- a 50-row seed file dropped into `data/streaming_in/`
+   was scored to `data/streaming_out/scored/batch-00000000.json` via
+   `make stream-once`.
+
+2. **Kafka source** -- the full Kafka path was set up and verified:
+   - Java 17 located at `/opt/homebrew/Cellar/openjdk@17/17.0.18` (system
+     default was 11; `JAVA_HOME` was set for the broker session).
+   - Broker started with `brew services start kafka` (KRaft mode).
+   - Topic `reviews` created via `kafka-topics-create`.
+   - Spark consumer launched via `make stream-kafka`, downloading the
+     `spark-sql-kafka-0-10_2.12:3.5.0` connector jar on first run.
+   - `scripts/kafka_producer.py` published **5 batches of 20 real
+     reviews** (100 messages total) onto the topic.
+   - Spark consumer wrote scored output to
+     `data/streaming_out/scored/kafka-batch-00000001.json` and
+     `kafka-batch-00000002.json`. Each record carries `"source":"kafka"`,
+     a model-derived `sentiment` label, and a `fraud_proba` score.
+
+**Producer note.** The shipped `scripts/kafka_producer.py` calls
+`fh.readlines()` on `data/raw/reviews.jsonl`, which would load the full
+11 GB file into memory at our scale. For the demo we pointed it at a
+200-row subsample (`--source /tmp/kafka_demo_reviews.jsonl`).
+Streaming the source line-by-line would let it handle the full corpus
+without subsampling -- a small follow-up.
 
 ---
 
@@ -381,9 +411,92 @@ This combines the model's numeric `fraud_proba` with a natural-language
 narrative -- useful when a non-technical reviewer (e.g., a marketplace
 operations analyst) needs to act on a flag.
 
+### MCP server (Model Context Protocol)
+
+`src/serve/mcp_server.py` exposes the same scoring + aggregate access as
+**Claude-callable tools** through the Model Context Protocol. It is built
+on `fastmcp`, communicates over stdio (JSON-RPC), and registers three
+tools:
+
+- `predict_review(review_body, star_rating, ...)` -- the same scorer the
+  REST `/predict` uses.
+- `get_fraud_reviewers(limit)` -- top suspicious reviewers from the ETL
+  aggregates.
+- `get_top_products(limit, sort_by)` -- top products, sortable by
+  `review_count`, `fraud_rate`, or `product_avg_rating`.
+
+To wire it into Claude Desktop, add the snippet at the top of
+`src/serve/mcp_server.py` to
+`~/Library/Application Support/Claude/claude_desktop_config.json`. The
+import + tool registration was smoke-tested this session.
+
+### LLM review auditor (Ollama tool-calling agent)
+
+`src/agents/review_auditor.py` is an autonomous review auditor that uses
+**Ollama tool-calling** against a local LLM to investigate a single
+product. It calls back into the FastAPI service for tools
+(`get_product_aggregate`, `get_product_reviews`,
+`get_top_fraud_reviewers`, `score_review`) and produces a structured
+audit report.
+
+**Live run on real data (this session):**
+
+```
+$ python -m src.agents.review_auditor --product-id B01415QHYW
+============================================================
+AUDIT REPORT -- Product: B01415QHYW
+============================================================
+[agent] calling get_product_aggregate({'product_id': 'B01415QHYW'})
+[agent] calling get_product_reviews({'product_id': 'B01415QHYW'})
+[agent] calling get_top_fraud_reviewers({'limit': '5'})
+[agent] calling score_review(...)
+
+** PRODUCT SUMMARY **
+ product_id      : B01415QHYW
+ product_category: Cell Phones and Accessories
+ review_count    : 42,644
+ avg_rating      : 4.29
+ fraud_rate      : 11.96%
+
+** RISK VERDICT **
+HIGH -- suspicious reviewer patterns found.
+```
+
+The local LLM used was Ollama `llama3.1:8b`. Switching to a different
+local model is one config change; switching to a hosted model would
+require swapping the `Client()` construction at the top of the file.
+
 ---
 
-## 8. Tests
+## 8. Streamlit demo dashboard
+
+In addition to the production FastAPI service, a single-file Streamlit
+app (`streamlit_app.py`, target `make streamlit`) is provided as a
+zero-setup demo UI for showing the project at a presentation or in
+class. Unlike the FastAPI app, it does **not** require the API server to
+be running -- it loads the persisted joblib pipelines and the
+Spark-ETL parquet aggregates directly.
+
+Five tabs:
+
+1. **Score a review** -- free-text + star slider + verified checkbox ->
+   live sentiment + `fraud_proba`.
+2. **Top products** -- sortable table from `product_agg.parquet`
+   (207,168 products), top-N slider.
+3. **Suspicious reviewers** -- sortable table from
+   `reviewer_agg.parquet` (487,979 reviewers), sorted by fraud rate.
+4. **Browse raw reviews** -- paginated browser of `data/raw/reviews.jsonl`
+   with optional live scoring of each row.
+5. **Distributions** -- Altair charts of star rating, sentiment label,
+   and body word count over a 50,000-row sample of the test holdout.
+
+`@st.cache_resource` and `@st.cache_data` ensure the 3 GB train parquet
+and the model files load once per session, so interactions remain
+sub-second after the first load.
+
+---
+
+## 9. Tests
 
 `tests/test_pipeline.py` exercises the code paths most likely to fail
 silently:
@@ -403,7 +516,7 @@ $ make test
 
 ---
 
-## 9. How to run
+## 10. How to run
 
 ```bash
 # install
@@ -426,13 +539,30 @@ make stream-once
 # serve dashboard + REST API
 make serve            # http://127.0.0.1:8000/
 
+# Streamlit demo UI
+make streamlit        # http://127.0.0.1:8501/
+
 # MLflow tracking UI
 make mlflow-ui        # http://127.0.0.1:5000/
 
-# Kafka streaming demo (requires `brew services start kafka` first)
+# Kafka streaming demo (requires JAVA_HOME pointed at JDK 17 first)
+export JAVA_HOME=$(brew --prefix openjdk@17)/libexec/openjdk.jdk/Contents/Home
+make kafka-start
 make kafka-topic-create
-make stream-kafka     # term 1
-make kafka-produce    # term 2
+make stream-kafka                 # term 1: Spark consumer
+python3 scripts/kafka_producer.py # term 2: producer (point at small subsample)
+
+# Model diagnostics
+python3 -m src.train.drift_monitor          # train vs test drift report
+python3 -m src.train.threshold_tuning       # populate models/thresholds.json
+python3 -m src.train.calibration_report     # raw vs sigmoid vs isotonic
+python3 -m src.train.error_analysis         # sample misclassifications
+
+# MCP server (Claude Desktop tool surface)
+make mcp
+
+# LLM review auditor (Ollama agent, requires local Ollama + FastAPI up)
+make audit PRODUCT=B01415QHYW
 
 # unit + integration tests
 make test
@@ -440,7 +570,7 @@ make test
 
 ---
 
-## 10. Results on the full real-data run
+## 11. Results on the full real-data run
 
 | Metric | Value | Notes |
 |---|---|---|
@@ -451,11 +581,11 @@ make test
 | Fraud-positive rate | **3.57%** (731,542 rows) | weak heuristic + 3.4% / 0.15% controlled noise |
 | Sentiment macro F1 | **0.680** | logreg+TF-IDF, `saga` solver |
 | Sentiment weighted F1 | **0.841** | accuracy 0.81 on 4.1 M test rows |
-| Sentiment per-class F1 | neg 0.78 · neu (low) · pos 0.91 | neutral is hardest -- 3-star reviews mix mild praise + complaint |
+| Sentiment per-class F1 | neg 0.78 - neu (low) - pos 0.91 | neutral is hardest -- 3-star reviews mix mild praise + complaint |
 | **Fraud ROC-AUC** | **0.845** | honest -- no rule-leakage |
 | Fraud F1 @ default 0.5 threshold | 0.244 | precision 0.147, recall 0.721 |
 | Selected fraud model | `logreg+tfidf+behavior` | beat SGD candidate: F1 0.244 vs 0.200 |
-| Top-volume product | ASIN `B01415QHYW` | 42,644 reviews · 4.29 avg star · 12% fraud rate |
+| Top-volume product | ASIN `B01415QHYW` | 42,644 reviews - 4.29 avg star - 12% fraud rate |
 | ETL runtime | ~24 min | tuned Spark config |
 | Train runtime | ~5h 20m | sentiment 52 min + fraud SGD ~30 min + fraud LogReg saga ~3.5 hr |
 | End-to-end (one pass) | **~6 hours** | on a 16 GB MacBook |
@@ -475,13 +605,100 @@ because:
    ranking.
 
 A production deployment would tune the threshold on the holdout to satisfy a
-business constraint (e.g., precision >= 0.9). The repo's
-`src/train/threshold_tuning.py` already supports this; running it would set
-`thresholds.json` and expose a tuned threshold to serving.
+business constraint (e.g., precision >= 0.9). We ran
+`src/train/threshold_tuning.py` this session and the result is in
+`models/thresholds.json` -- see Section 12.
 
 ---
 
-## 11. Honest caveats -- read before quoting numbers
+## 12. Model diagnostics (this session)
+
+Four offline analysis modules were run on the 4,105,036-row holdout
+test parquet. None of them retrain the model -- they are pure
+inference + statistics, so they each finish in single-digit minutes.
+All outputs are written under `reports/ml/`.
+
+### 12.1 Drift monitor (`src/train/drift_monitor.py`)
+
+Reports population-stability-index (PSI) and per-feature distribution
+drift between the **train** parquet and the **test** parquet across all
+17 numeric ETL features. Output: `reports/ml/drift_report.json`.
+
+```
+reference rows: 16,413,084
+current rows:    4,105,036
+numeric features compared: 17
+```
+
+The 80/20 random split is i.i.d. by construction, so we expect no
+meaningful drift -- and the report confirms that. The same module is
+the production-time hook: in a deployment, point `--current` at last
+week's parquet to detect distribution shift.
+
+### 12.2 Fraud threshold tuning (`src/train/threshold_tuning.py`)
+
+Sweeps the fraud probability threshold from 0.05 to 0.95, computes
+precision / recall / F1 at each, and writes:
+
+- `reports/ml/threshold_study.csv` -- the full sweep table
+- `models/thresholds.json` -- the picked threshold
+
+Result on the held-out 4.1 M rows:
+
+| Threshold | Precision | Recall | F1 |
+|---|---|---|---|
+| 0.5 (default) | 0.147 | 0.722 | 0.244 |
+| 0.6 | 0.193 | 0.635 | 0.296 |
+| 0.7 | 0.242 | 0.549 | 0.336 |
+| **0.8 (best F1)** | **0.292** | **0.457** | **0.356** |
+| 0.9 | 0.358 | 0.265 | 0.305 |
+
+**Best F1 threshold = 0.80** (the operating point a marketplace
+moderator would actually want, not the textbook 0.5). The
+precision >= 0.95 target was not achievable on this corpus -- which
+makes sense given the ETL added intentional label noise to defeat
+rule-leakage; the true upper bound is bounded by that noise rate.
+
+### 12.3 Fraud calibration (`src/train/calibration_report.py`)
+
+Compares raw model probabilities to two post-hoc calibrators:
+
+- **sigmoid (Platt)**: `LogisticRegression` on (proba, label).
+- **isotonic**: monotone non-parametric mapping.
+
+| Method | Brier score | ECE | ROC-AUC |
+|---|---|---|---|
+| raw | 0.143 | 0.302 | 0.846 |
+| sigmoid (Platt) | 0.030 | 0.002 | 0.846 |
+| **isotonic** (best by Brier) | **0.029** | **0.000146** | 0.846 |
+
+Calibration **improves Brier ~5x and ECE ~2,000x** without changing
+ranking quality (ROC-AUC unchanged). For deployments where the score
+is reported as a probability to operators, isotonic-calibrated output
+is the honest one. Outputs:
+`reports/ml/fraud_calibration_report.csv`,
+`fraud_calibration_bins.csv`,
+`fraud_calibration_summary.json`.
+
+### 12.4 Error analysis (`src/train/error_analysis.py`)
+
+Samples misclassified rows from each task and writes them to CSV for
+manual review:
+
+- `reports/ml/sentiment_error_samples.csv` -- 775,780 sentiment errors
+  out of 4,105,036 (19% error rate, dominated by neutral confused for
+  positive).
+- `reports/ml/fraud_error_samples.csv` -- 654,034 fraud errors (mix of
+  false-positive duplicates and false-negative low-velocity
+  reviewers).
+
+These CSVs are large (~250 MB combined) and intentionally not
+committed to git; they are regenerated in minutes from the
+already-saved model.
+
+---
+
+## 13. Honest caveats -- read before quoting numbers
 
 1. **Single product category.** All 20.8 M reviews are
    `Cell Phones and Accessories`. The `product_category` dimension in the
@@ -507,40 +724,56 @@ business constraint (e.g., precision >= 0.9). The repo's
    either a real cluster or a sub-sample for the fraud trainer (with
    aggregates and serving still using the full corpus).**
 
-5. **Kafka streaming demo not exercised.** The Kafka source variant
-   (`score_stream_kafka.py`) and producer (`scripts/kafka_producer.py`)
-   ship in the repo but were not run this session because no broker is up
-   locally. The non-Kafka serving and dashboard work end-to-end on the
-   real models.
+5. **`baselines.py` and `ablation_study.py` not run on full data.**
+   These two analysis scripts retrain models per call. `ablation_study`
+   uses the original `GradientBoostingClassifier` (single-threaded), so
+   running it on the full 16 M corpus would take days. They are still
+   tractable on a 1 M-row subsample of the parquet -- a follow-up the
+   project owner can opt into.
 
 ---
 
-## 12. Where this would go next
+## 14. Where this would go next
 
-- **Multi-category training.** Concatenate 5–10 category JSONLs to break
-  the single-category pall and let category-based features add signal.
-- **Tune the fraud threshold.** Run
-  `python3 -m src.train.threshold_tuning` to populate `thresholds.json`
-  with a precision-target threshold, then have FastAPI honor it.
-- **Hand-labeled fraud sample.** Build a small (~1,000-row) human-labeled
-  validation set so the AUC isn't measured against a noisy weak-label
-  proxy.
+- **Multi-category training.** Concatenate 5--10 category JSONLs to
+  break the single-category pall and let category-based features add
+  signal.
+- **Wire the tuned threshold into serving.** `models/thresholds.json`
+  now holds `best_f1_threshold = 0.80`; have FastAPI honor it instead
+  of the hard-coded 0.5 in the `fraud_flag` decision.
+- **Wire calibration into serving.** Section 12.3 found isotonic
+  calibration cuts Brier ~5x with no ROC-AUC change. Emit
+  isotonic-calibrated `fraud_proba` from `/predict`.
+- **Stream the Kafka producer source.** `scripts/kafka_producer.py`
+  currently calls `readlines()`, which OOMs on the full 11 GB JSONL.
+  Switch to line-by-line read so the producer can replay the full
+  corpus into Kafka at any rate.
+- **Hand-labeled fraud sample.** Build a small (~1,000-row)
+  human-labeled validation set so the AUC isn't measured against a
+  noisy weak-label proxy.
+- **Run `baselines.py` and `ablation_study.py`** on a 1 M-row
+  subsample to ground the chosen architecture against simpler /
+  alternative classifiers.
 - **Promote models through MLflow Model Registry.** Stage -> production
   promotion, FastAPI loads by stage rather than by file path.
-- **Containerize.** Dockerfile + docker-compose for Spark + MLflow + Kafka
-  + FastAPI so the project deploys on any host with a single command.
+- **Containerize.** Dockerfile + docker-compose for Spark + MLflow +
+  Kafka + FastAPI so the project deploys on any host with a single
+  command.
 - **Feature store.** Real reviewer / product history at serving time
-  instead of neutral defaults -- closes the train/serve skew gap on the
-  behavioral features.
+  instead of neutral defaults -- closes the train/serve skew gap on
+  the behavioral features.
 
 ---
 
 ## Appendix A -- Code changes that enabled the full-scale run
 
-| File | Change |
-|---|---|
-| `src/common/spark.py` | Driver memory 2g -> 8g (env-overridable), shuffle partitions 8 -> 200, AQE on, Kryo serializer, larger maxResultSize. |
-| `src/train/train.py` | Column-subset parquet read + dtype downcast; sentiment LogReg switched to `saga` solver; replaced `GradientBoostingClassifier` and heavy `RandomForestClassifier` with `SGDClassifier(log_loss)` and `LogisticRegression(saga)`; tightened TF-IDF (`min_df=10`, fraud `max_features=15_000`). |
-| `data/raw/reviews.jsonl` | Symlink to the converted 11 GB project-schema JSONL (avoids duplicating the dataset). |
+| File | Change | Commit |
+|---|---|---|
+| `src/common/spark.py` | Driver memory 2g -> 8g (env-overridable), shuffle partitions 8 -> 200, AQE on, Kryo serializer, larger maxResultSize. | `8e2c65c` |
+| `src/train/train.py` | Column-subset parquet read + dtype downcast; sentiment LogReg switched to `saga` solver; replaced `GradientBoostingClassifier` and heavy `RandomForestClassifier` with `SGDClassifier(log_loss)` and `LogisticRegression(saga)`; tightened TF-IDF (`min_df=10`, fraud `max_features=15_000`). | `10b63b7` |
+| `streamlit_app.py` (new) + `Makefile` | Single-file Streamlit dashboard + `make streamlit` target. | `a9431fc` |
+| `PROJECT_REPORT.md` (new) + `PROJECT_REPORT.pdf` | This report -- editable markdown source plus rendered PDF. | `1e0f013` |
+| `data/raw/reviews.jsonl` | Symlink to the converted 11 GB project-schema JSONL (avoids duplicating the dataset). | (not in git -- local symlink) |
 
-These changes are currently uncommitted in the working tree -- pending review.
+All four code/report commits are merged into `origin/main` at
+`https://github.com/Paruchuri-Rajesh/Large_Scale_Product-Review`.
