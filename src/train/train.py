@@ -25,10 +25,8 @@ import mlflow.sklearn
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
-from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import LogisticRegression, SGDClassifier
 from sklearn.metrics import (
     classification_report,
     f1_score,
@@ -62,7 +60,7 @@ from src.train.registry import load_json_optional  # noqa: E402
 
 # Stable names aligned with MLflow params / proposal wording (for meta.json only).
 _SENTIMENT_MODEL_NAME = "logreg+tfidf"
-_FRAUD_MODEL_NAME = "gbt+tfidf+behavior"
+_FRAUD_MODEL_NAME = "logreg+tfidf+behavior"
 
 
 def _artifact_path_or_null(path: Path) -> str | None:
@@ -70,15 +68,52 @@ def _artifact_path_or_null(path: Path) -> str | None:
     return str(path.resolve()) if path.exists() else None
 
 
+# Columns we actually need at training time. Reading a subset of columns keeps
+# pandas memory small enough that 20M-row parquet outputs fit in 16 GB RAM.
+_NUMERIC_FEATURES_TO_READ = [c for c in FRAUD_NUMERIC_FEATURES if c != "verified_purchase_int"]
+_REQUIRED_COLUMNS = [
+    "review_body_clean",
+    "sentiment_label",
+    "fraud_label",
+    "verified_purchase",
+] + _NUMERIC_FEATURES_TO_READ
+
+_INT8_COLS = {"sentiment_label", "fraud_label"}
+_INT32_COLS = {
+    "star_rating",
+    "helpful_votes",
+    "total_votes",
+    "body_len",
+    "body_word_count",
+    "exclam_count",
+    "reviewer_review_count",
+    "reviewer_distinct_products",
+    "reviewer_reviews_same_day",
+    "product_review_count",
+    "dup_in_product",
+}
+
+
 def _read_parquet(path: Path) -> pd.DataFrame:
     # Spark writes a directory of part-*.parquet files; pandas/pyarrow handles that.
-    df = pd.read_parquet(path)
-    df["verified_purchase_int"] = df["verified_purchase"].fillna(False).astype(int)
+    # Column subset + dtype downcast keeps the 16M-row dataframe under ~6 GB.
+    df = pd.read_parquet(path, columns=_REQUIRED_COLUMNS)
+    df["verified_purchase_int"] = (
+        df["verified_purchase"].fillna(False).astype(np.int8)
+    )
+    df.drop(columns=["verified_purchase"], inplace=True)
     df["review_body_clean"] = df["review_body_clean"].fillna("")
+    for c in _INT8_COLS:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(np.int8)
+    for c in _INT32_COLS:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(np.int32)
     for c in FRAUD_NUMERIC_FEATURES:
         if c not in df.columns:
             continue
-        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
+        if df[c].dtype == np.float64:
+            df[c] = df[c].fillna(0.0).astype(np.float32)
     return df
 
 
@@ -89,7 +124,7 @@ def train_sentiment(train: pd.DataFrame, test: pd.DataFrame) -> dict:
                 "tfidf",
                 TfidfVectorizer(
                     ngram_range=(1, 2),
-                    min_df=3,
+                    min_df=10,
                     max_df=0.9,
                     max_features=50_000,
                     sublinear_tf=True,
@@ -98,9 +133,12 @@ def train_sentiment(train: pd.DataFrame, test: pd.DataFrame) -> dict:
             (
                 "clf",
                 LogisticRegression(
-                    max_iter=400,
+                    solver="saga",
+                    max_iter=100,
                     class_weight="balanced",
                     C=2.0,
+                    n_jobs=-1,
+                    random_state=42,
                 ),
             ),
         ]
@@ -110,8 +148,10 @@ def train_sentiment(train: pd.DataFrame, test: pd.DataFrame) -> dict:
         mlflow.log_params(
             {
                 "model": "logreg+tfidf",
+                "solver": "saga",
                 "ngram_range": "1,2",
                 "max_features": 50000,
+                "min_df": 10,
                 "C": 2.0,
                 "class_weight": "balanced",
                 "n_train": len(train),
@@ -143,9 +183,9 @@ def train_sentiment(train: pd.DataFrame, test: pd.DataFrame) -> dict:
 def _fraud_preprocessor() -> ColumnTransformer:
     text_vec = TfidfVectorizer(
         ngram_range=(1, 2),
-        min_df=3,
+        min_df=10,
         max_df=0.95,
-        max_features=20_000,
+        max_features=15_000,
         sublinear_tf=True,
     )
     return ColumnTransformer(
@@ -185,29 +225,37 @@ def _eval_fraud_pipe(pipe: Pipeline, train: pd.DataFrame, test: pd.DataFrame) ->
 
 def train_fraud(train: pd.DataFrame, test: pd.DataFrame) -> dict:
     # Two fraud candidates, same feature flow; pick best by holdout F1.
-    gbt = Pipeline(
+    # GradientBoostingClassifier (single-threaded) and the heavy RF that this
+    # file used to instantiate are not tractable on the full 20M-record corpus
+    # within laptop limits, so we now train two parallel/sparse-friendly
+    # classifiers that still satisfy the saved-pipeline contract used by the
+    # serving + streaming layers.
+    sgd = Pipeline(
         [
             ("pre", _fraud_preprocessor()),
             (
                 "clf",
-                GradientBoostingClassifier(
-                    n_estimators=120,
-                    max_depth=3,
-                    learning_rate=0.1,
+                SGDClassifier(
+                    loss="log_loss",
+                    class_weight="balanced",
+                    alpha=1e-5,
+                    max_iter=20,
+                    n_jobs=-1,
                     random_state=42,
                 ),
             ),
         ]
     )
-    rf = Pipeline(
+    logreg = Pipeline(
         [
             ("pre", _fraud_preprocessor()),
             (
                 "clf",
-                RandomForestClassifier(
-                    n_estimators=220,
-                    max_depth=16,
-                    min_samples_leaf=2,
+                LogisticRegression(
+                    solver="saga",
+                    class_weight="balanced",
+                    C=1.0,
+                    max_iter=80,
                     n_jobs=-1,
                     random_state=42,
                 ),
@@ -215,41 +263,44 @@ def train_fraud(train: pd.DataFrame, test: pd.DataFrame) -> dict:
         ]
     )
 
-    with mlflow.start_run(run_name="fraud-gbt-tfidf+behavior") as run:
-        gbt_out = _eval_fraud_pipe(gbt, train, test)
-        rf_out = _eval_fraud_pipe(rf, train, test)
-        if rf_out["f1"] > gbt_out["f1"]:
-            chosen = rf_out
-            chosen_name = "rf+tfidf+behavior"
+    with mlflow.start_run(run_name="fraud-logreg-tfidf+behavior") as run:
+        sgd_out = _eval_fraud_pipe(sgd, train, test)
+        logreg_out = _eval_fraud_pipe(logreg, train, test)
+        if sgd_out["f1"] > logreg_out["f1"]:
+            chosen = sgd_out
+            chosen_name = "sgd+tfidf+behavior"
             chosen_params = {
-                "model": "rf+tfidf+behavior",
-                "n_estimators": 220,
-                "max_depth": 16,
-                "min_samples_leaf": 2,
+                "model": "sgd+tfidf+behavior",
+                "loss": "log_loss",
+                "alpha": 1e-5,
+                "max_iter": 20,
             }
         else:
-            chosen = gbt_out
-            chosen_name = "gbt+tfidf+behavior"
+            chosen = logreg_out
+            chosen_name = "logreg+tfidf+behavior"
             chosen_params = {
-                "model": "gbt+tfidf+behavior",
-                "n_estimators": 120,
-                "max_depth": 3,
-                "learning_rate": 0.1,
+                "model": "logreg+tfidf+behavior",
+                "solver": "saga",
+                "C": 1.0,
+                "max_iter": 80,
             }
         mlflow.log_params(
             {
                 **chosen_params,
                 "ngram_range": "1,2",
-                "max_features_text": 20000,
+                "max_features_text": 15000,
                 "n_train": len(train),
                 "n_test": len(test),
                 "fraud_share_train": float(train["fraud_label"].mean()),
-                "candidate_gbt_f1": gbt_out["f1"],
-                "candidate_rf_f1": rf_out["f1"],
+                "candidate_sgd_f1": sgd_out["f1"],
+                "candidate_logreg_f1": logreg_out["f1"],
                 "selected_fraud_model_name": chosen_name,
             }
         )
-        print(f"[fraud] selected={chosen_name} (gbt_f1={gbt_out['f1']:.4f}, rf_f1={rf_out['f1']:.4f})")
+        print(
+            f"[fraud] selected={chosen_name} "
+            f"(sgd_f1={sgd_out['f1']:.4f}, logreg_f1={logreg_out['f1']:.4f})"
+        )
         print("[fraud]\n" + chosen["report"])
         print(f"[fraud] roc_auc={chosen['auc']:.4f}")
         mlflow.log_metric("roc_auc", float(chosen["auc"]) if not np.isnan(chosen["auc"]) else 0.0)
