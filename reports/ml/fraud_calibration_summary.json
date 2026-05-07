@@ -1,0 +1,44 @@
+{
+  "calibration_split": {
+    "n_calib": 2052518,
+    "n_eval": 2052518,
+    "seed": 42
+  },
+  "best_calibrated_method_by_brier": "isotonic",
+  "report_rows": [
+    {
+      "method": "raw",
+      "precision": 0.1468174001265403,
+      "recall": 0.7225849817553294,
+      "f1": 0.24404821197330412,
+      "roc_auc": 0.8458285646186366,
+      "brier": 0.14262815606009238,
+      "ece": 0.3018231497419047,
+      "n_eval": 2052518,
+      "n_calib": 2052518
+    },
+    {
+      "method": "sigmoid_platt",
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "roc_auc": 0.8458285646186366,
+      "brier": 0.029580057417192558,
+      "ece": 0.001949500437507132,
+      "n_eval": 2052518,
+      "n_calib": 2052518
+    },
+    {
+      "method": "isotonic",
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "roc_auc": 0.8459378410893005,
+      "brier": 0.02946989461733395,
+      "ece": 0.0001459545017417897,
+      "n_eval": 2052518,
+      "n_calib": 2052518
+    }
+  ],
+  "note": "This report is offline analysis only. Serving behavior is unchanged unless explicitly updated."
+}

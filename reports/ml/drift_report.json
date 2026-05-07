@@ -1,0 +1,113 @@
+{
+  "row_count_reference": 16413084,
+  "row_count_current": 4105036,
+  "numeric_mean_comparison": [
+    {
+      "feature": "star_rating",
+      "reference_mean": 4.008267002106368,
+      "current_mean": 4.008168746875788,
+      "mean_delta": -9.825523058015762e-05
+    },
+    {
+      "feature": "helpful_votes",
+      "reference_mean": 0.5411657553205723,
+      "current_mean": 0.5436176442788808,
+      "mean_delta": 0.0024518889583085013
+    },
+    {
+      "feature": "total_votes",
+      "reference_mean": 0.5411657553205723,
+      "current_mean": 0.5436176442788808,
+      "mean_delta": 0.0024518889583085013
+    },
+    {
+      "feature": "verified_purchase_int",
+      "reference_mean": 0.9474667893005361,
+      "current_mean": 0.9475273785662294,
+      "mean_delta": 6.0589265693300476e-05
+    },
+    {
+      "feature": "body_len",
+      "reference_mean": 171.85845877593755,
+      "current_mean": 172.0268589605548,
+      "mean_delta": 0.1684001846172407
+    },
+    {
+      "feature": "body_word_count",
+      "reference_mean": 33.69888675400674,
+      "current_mean": 33.73368491774494,
+      "mean_delta": 0.03479816373819489
+    },
+    {
+      "feature": "exclam_count",
+      "reference_mean": 0.3817682892502104,
+      "current_mean": 0.3816687600303627,
+      "mean_delta": -9.95292198476827e-05
+    },
+    {
+      "feature": "reviewer_review_count",
+      "reference_mean": 3.6894100462777137,
+      "current_mean": 3.6917262114144673,
+      "mean_delta": 0.0023161651367535896
+    },
+    {
+      "feature": "reviewer_avg_rating",
+      "reference_mean": 4.008323074752938,
+      "current_mean": 4.007944552725419,
+      "mean_delta": -0.00037852202751853525
+    },
+    {
+      "feature": "reviewer_pct_5star",
+      "reference_mean": 0.6118646103024531,
+      "current_mean": 0.6115889737577388,
+      "mean_delta": -0.0002756365447142972
+    },
+    {
+      "feature": "reviewer_distinct_products",
+      "reference_mean": 3.6157616691658925,
+      "current_mean": 3.6181904373067617,
+      "mean_delta": 0.0024287681408692308
+    },
+    {
+      "feature": "reviewer_reviews_same_day",
+      "reference_mean": 1.3687955292253424,
+      "current_mean": 1.3685531625057612,
+      "mean_delta": -0.0002423667195812218
+    },
+    {
+      "feature": "reviewer_verified_share",
+      "reference_mean": 0.9474655207888464,
+      "current_mean": 0.9475324504313527,
+      "mean_delta": 6.692964250631928e-05
+    },
+    {
+      "feature": "product_review_count",
+      "reference_mean": 1049.6425728400586,
+      "current_mean": 1048.6096575036127,
+      "mean_delta": -1.0329153364459671
+    },
+    {
+      "feature": "product_avg_rating",
+      "reference_mean": 4.008232328538625,
+      "current_mean": 4.0083073815138155,
+      "mean_delta": 7.505297519028176e-05
+    },
+    {
+      "feature": "product_pct_5star",
+      "reference_mean": 0.6118147270401592,
+      "current_mean": 0.6117884210157465,
+      "mean_delta": -2.6306024412670048e-05
+    },
+    {
+      "feature": "dup_in_product",
+      "reference_mean": 1.3006360047874002,
+      "current_mean": 1.3004665488926284,
+      "mean_delta": -0.00016945589477179723
+    }
+  ],
+  "text_length_summary": {
+    "reference_avg_length": 171.85845877593755,
+    "current_avg_length": 172.0268589605548,
+    "avg_length_delta": 0.1684001846172407
+  }
+}

@@ -23,3 +23,7 @@ mlruns/
 !data/streaming_in/.gitkeep
 !data/streaming_out/.gitkeep
 !models/.gitkeep
+
+# error_analysis output (regenerable, exceeds GitHub's 100 MB file limit at full scale)
+reports/ml/sentiment_error_samples.csv
+reports/ml/fraud_error_samples.csv
