@@ -15,7 +15,11 @@ from __future__ import annotations
 import glob
 import json
 import math
+import os
 import sys
+import time
+import uuid
+from datetime import date
 from pathlib import Path
 from typing import Any, Optional  # Optional keeps Pydantic happy on Python 3.9 (no `str | None` runtime eval).
 
@@ -49,6 +53,57 @@ from src.common.text import enrich_for_serving as _enrich_for_serving  # noqa: E
 from src.train.features import get_fraud_numeric_features  # noqa: E402
 
 NUMERIC_FRAUD_FEATURES = get_fraud_numeric_features()
+
+# Optional Kafka mirror: when PUBLISH_PREDICT_TO_KAFKA=1, every /predict call
+# also fire-and-forget publishes its review to the 'reviews' topic so it flows
+# through the Kafka → Spark Streaming → /stream/recent path. Failures here
+# never break the sync /predict response.
+_kafka_producer: Any = None
+
+
+def _maybe_get_kafka_producer() -> Any:
+    global _kafka_producer
+    if os.environ.get("PUBLISH_PREDICT_TO_KAFKA") != "1":
+        return None
+    if _kafka_producer is not None:
+        return _kafka_producer
+    try:
+        from kafka import KafkaProducer  # type: ignore
+        _kafka_producer = KafkaProducer(
+            bootstrap_servers=os.environ.get("KAFKA_BROKER", "localhost:9092"),
+            value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+            acks=1,
+            linger_ms=0,
+            request_timeout_ms=2000,
+        )
+    except Exception:
+        _kafka_producer = None
+    return _kafka_producer
+
+
+def _publish_review_to_kafka(review: "Review") -> None:
+    producer = _maybe_get_kafka_producer()
+    if producer is None:
+        return
+    record = {
+        "review_id": str(uuid.uuid4()),
+        "product_id": review.product_id or f"BFORM{uuid.uuid4().hex[:6].upper()}",
+        "reviewer_id": review.reviewer_id or f"R{uuid.uuid4().hex[:24].upper()}",
+        "star_rating": review.star_rating or 5,
+        "helpful_votes": review.helpful_votes or 0,
+        "total_votes": review.total_votes or 0,
+        "verified_purchase": bool(review.verified_purchase),
+        "review_headline": review.review_headline or "form-submitted review",
+        "review_body": review.review_body,
+        "review_date": date.today().isoformat(),
+        "product_category": "User Submitted",
+        "event_ts": int(time.time()),
+    }
+    try:
+        producer.send(os.environ.get("KAFKA_TOPIC", "reviews"), value=record)
+    except Exception:
+        pass
+
 
 app = FastAPI(title="Amazon Reviews — Sentiment & Fraud", version="1.0.0")
 
@@ -258,6 +313,7 @@ def metadata() -> dict:
 
 @app.post("/predict")
 def predict(review: Review) -> dict:
+    _publish_review_to_kafka(review)
     return _score([review])[0]
 
 
@@ -267,6 +323,8 @@ def predict_batch(req: BatchRequest) -> dict:
         raise HTTPException(400, "reviews must not be empty")
     if len(req.reviews) > 1000:
         raise HTTPException(400, "max 1000 reviews per batch")
+    for r in req.reviews:
+        _publish_review_to_kafka(r)
     return {"predictions": _score(req.reviews)}
 
 

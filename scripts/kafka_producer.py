@@ -36,26 +36,32 @@ def main() -> None:
         value_serializer=lambda v: json.dumps(v).encode("utf-8"),
     )
 
-    with args.source.open() as fh:
-        lines = fh.readlines()
+    def line_stream():
+        # Stream line-by-line; cycle from the top if we run out so callers can
+        # request more batches than the source has rows.
+        while True:
+            with args.source.open() as fh:
+                for line in fh:
+                    yield line
 
-    # Cycle if not enough lines
-    if len(lines) < args.batch_size * args.n_batches:
-        lines = lines * ((args.batch_size * args.n_batches) // len(lines) + 1)
-
-    cursor = 0
+    src = line_stream()
+    sent = 0
     for i in range(args.n_batches):
-        chunk = lines[cursor: cursor + args.batch_size]
-        cursor += args.batch_size
-        for line in chunk:
-            record = json.loads(line)
+        for _ in range(args.batch_size):
+            line = next(src)
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
             producer.send(args.topic, value=record)
+            sent += 1
         producer.flush()
-        print(f"[kafka-producer] batch {i+1}/{args.n_batches} → topic={args.topic} ({len(chunk)} msgs)")
-        time.sleep(args.sleep)
+        print(f"[kafka-producer] batch {i+1}/{args.n_batches} → topic={args.topic} ({args.batch_size} msgs)  total_sent={sent}")
+        if args.sleep > 0:
+            time.sleep(args.sleep)
 
     producer.close()
-    print("[kafka-producer] done")
+    print(f"[kafka-producer] done — {sent} messages sent")
 
 
 if __name__ == "__main__":
