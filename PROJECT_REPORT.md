@@ -2,7 +2,7 @@
 title: "Large-Scale Product Review Sentiment & Fraud Detection"
 subtitle: "End-to-end build report -- A to Z"
 author: "Group 6: Prerana Ramesh, Rajesh Paruchuri, Ritika Mukesh Neema, Sneha Singh"
-date: "May 2026"
+date: "May 2026 (full-run + live verification session)"
 geometry: margin=1in
 fontsize: 11pt
 toc: true
@@ -56,7 +56,10 @@ toc-depth: 2
 | MCP server | OK -- 3 tools registered for Claude Desktop |
 | Ollama review auditor (autonomous agent) | OK -- Ran on real ASIN `B01415QHYW`, produced HIGH risk verdict |
 | Model diagnostics (drift / threshold / calibration / error) | OK -- 4 analysis modules run on 4.1 M-row holdout |
-| Tests | OK -- unit + integration |
+| Tests | OK -- 11/11 pass in 13.4 s |
+| Form -> Kafka -> Spark fan-out | OK -- `/predict` publishes to Kafka when `PUBLISH_PREDICT_TO_KAFKA=1` (Section 18.4) |
+| Kafka UI (provectus, Docker) | OK -- `:8090` connected to broker via dual-listener (Section 18.5) |
+| Spark big-data demo on 20.5 M rows | OK -- 30.8 s end-to-end, 4 stages, 626 MB shuffle write (Section 18.2) |
 
 ---
 
@@ -564,12 +567,14 @@ logic lifts to a pandas UDF or a properly-broadcast joblib model.
 
 ## 9.4 Kafka producer note
 
-The shipped `scripts/kafka_producer.py` calls
-`fh.readlines()` on `data/raw/reviews.jsonl`, which would load the full
-11 GB file into memory at our scale. For the demo we pointed it at a
-200-row subsample (`--source /tmp/kafka_demo_reviews.jsonl`). Streaming
-the source line-by-line would let it handle the full corpus without
-subsampling -- a small follow-up.
+The shipped `scripts/kafka_producer.py` previously called
+`fh.readlines()` on `data/raw/reviews.jsonl`, which loaded the full 11 GB
+file into memory at our scale and would hang on startup. **This was
+fixed in commit `bb10288`** (May 7, 2026): the producer now streams the
+source line-by-line via a generator, with automatic cycling when the
+caller asks for more batches than the source has rows. After the fix it
+sustained **2,000 messages in 13 s = 153 msg/s** in the live demo
+(Section 18.3).
 
 ---
 
@@ -947,10 +952,6 @@ done
 - **Wire calibration into serving.** Section 8.3 found isotonic
   calibration cuts Brier ~5x with no ROC-AUC change. Emit
   isotonic-calibrated `fraud_proba` from `/predict`.
-- **Stream the Kafka producer source.** `scripts/kafka_producer.py`
-  currently calls `readlines()`, which OOMs on the full 11 GB JSONL.
-  Switch to line-by-line read so the producer can replay the full
-  corpus into Kafka at any rate.
 - **Hand-labeled fraud sample.** Build a small (~1,000-row)
   human-labeled validation set so the AUC isn't measured against a
   noisy weak-label proxy.
@@ -969,6 +970,345 @@ done
 
 ---
 
+# 18. Live verification & demo session (May 7, 2026)
+
+After the full real-data run was archived, an additional 6-hour session
+was used to:
+
+1. Verify every surface end-to-end against the persisted models
+2. Build live observability for the streaming pipeline (Spark UI, Kafka UI,
+   FastAPI Live Stream tab) so the data flow is visible from a browser
+3. Wire the FastAPI `/predict` endpoint to also publish to Kafka, closing
+   the loop between the synchronous form path and the streaming path
+4. Add three small helper scripts (`spark_bigdata_demo.py`, `kafka_tap.py`,
+   `publish_one_review.py`) that turn the existing infrastructure into a
+   teachable demo
+5. Fix a bug in the Kafka producer that prevented full-scale replay
+6. Discover (and document) one remaining bug in `score_stream.py`
+
+This section records that session.
+
+## 18.1 Component verification matrix
+
+Every surface listed in Section 1.2 was re-verified against the persisted
+artifacts. Results:
+
+| Surface | Verification | Outcome |
+|---|---|---|
+| `pytest tests/` | 11 unit + integration tests | **11/11 pass in 13.4 s** |
+| `models/sentiment_pipeline.joblib` | Loaded by FastAPI + Spark | macro-F1 0.680, weighted-F1 0.841 (from `meta.json`) |
+| `models/fraud_pipeline.joblib` | Loaded by FastAPI + Spark | ROC-AUC 0.845 (from `meta.json`) |
+| `data/processed/train.parquet` | Read by Spark big-data demo | 16,413,084 rows confirmed |
+| `data/processed/test.parquet` | Read by Spark big-data demo | 4,105,036 rows confirmed |
+| `data/processed/{product,reviewer}_agg.parquet` | Served by `/aggregates/*` | 1.6 M products, 11.5 M reviewers |
+| `reports/ml/drift_report.json` | Surfaced through `/metadata` | Present and well-formed |
+| `reports/ml/threshold_study.csv` | Surfaced through `/metadata` | Present, 9 threshold steps |
+| `reports/ml/fraud_calibration_*.{csv,json}` | Read by build report | Present (raw / sigmoid / isotonic) |
+| `reports/ml/{sentiment,fraud}_error_samples.csv` | Used by error-analysis script | 188 + 85 MB; gitignored |
+| FastAPI `GET /healthz` | curl | **200 OK** |
+| FastAPI `GET /metadata` | curl | Returns full metadata payload incl. selection + drift |
+| FastAPI `POST /predict` | curl + form | Sentiment + fraud_proba + LLM `fraud_explanation` |
+| FastAPI `POST /predict/batch` | curl with 3-row batch | All 3 scored, returns `{predictions: [...]}` |
+| FastAPI `GET /aggregates/products` | curl | Top product `B01415QHYW` (42,644 reviews, 11.96% fraud-rate) |
+| FastAPI `GET /aggregates/fraud-reviewers` | curl | Top suspicious reviewer with 66 reviews, fraud_rate 1.00 |
+| FastAPI `GET /stream/recent` | curl | Returns Kafka-sourced scored rows |
+| Spark Structured Streaming (Kafka source) | Producer + consumer end-to-end | Verified 113 → 118 micro-batch files written |
+| Streamlit demo | Boot + `/_stcore/health` | 200 OK on `:8501` |
+| MCP server | Boot via stdio | `Amazon Reviews — Sentiment & Fraud Detector` started, 3 tools registered |
+| Ollama review auditor | `make audit PRODUCT=B01415QHYW` | Audit completed; HIGH risk verdict; 4 tool calls (`get_product_aggregate`, `get_product_reviews`, `get_top_fraud_reviewers`, `score_review`) |
+| Ollama LLM explanation | Form submission | `llama3.1:8b` produced realistic risk summaries on real text |
+| Kafka broker (homebrew kafka) | `kafka-get-offsets` + topic describe | Online; topic `reviews` partition 0 |
+| Kafka UI (provectus/kafka-ui in Docker) | Browser at `:8090` | Connected to broker; live message viewer working |
+
+Every component listed above was either verified or measured in this
+session, against the same persisted models and data described elsewhere
+in the report.
+
+## 18.2 Spark batch on 20.5 M rows -- live demo
+
+A new helper, [`scripts/spark_bigdata_demo.py`](scripts/spark_bigdata_demo.py),
+reads the full **20.5 M-row** processed corpus (train + test parquets,
+3.8 GB on disk) and runs four representative aggregations with shuffles
+and a join. Spark UI is exposed on `http://localhost:4040` while the job
+runs.
+
+```bash
+SPARK_DRIVER_MEM=8g python3 -m scripts.spark_bigdata_demo
+```
+
+Run results (full 20,518,120 rows, single-node `local[*]`):
+
+| Stage | Operation | Shuffle? | Time |
+|---|---|---|---|
+| Stage 1 | `avg(star_rating)`, `count(*)`, `avg(fraud_label)` | No | **1.8 s** |
+| Stage 2 | `groupBy(reviewer_id)` -> top-10 by review count | Yes (by `reviewer_id`) | **10.7 s** |
+| Stage 3 | `groupBy(product_id)` -> top-5 by fraud rate | Yes (by `product_id`) | **2.2 s** |
+| Stage 4 | Inner join + filter + count | Yes (large hash-join) | **13.5 s** |
+| | **Total** | | **30.8 s** |
+
+Headline numbers from the Spark UI mid-job:
+
+- **Stage 8** (the reviewer_id groupBy): 45 parallel tasks, **603 MB
+  read**, **626 MB shuffle write**.
+- Aggregate results: global avg star_rating = 4.008; global fraud_rate
+  = 0.0357; reviewer with highest count = `AG73BVBKUOH22USSFJA5ZWL7AKXA`
+  (410 reviews, fraud_rate 0.122); product with highest fraud rate
+  >= 200 reviews = `B00BI9AKJI` (363 reviews, fraud_rate 0.413).
+- 237,967 reviews are on products with fraud_rate >= 0.20.
+
+These exact numbers are reproducible by running the helper. They show
+the production-scale Spark mechanics (DAG scheduling, partitioned tasks,
+shuffle write/read, AQE) that scale unchanged to a multi-node cluster
+via `spark-submit --master ...`.
+
+## 18.3 Kafka real-time streaming (variable batch sizes)
+
+The Kafka path was driven through three deliberate phases to expose how
+Spark Structured Streaming pulls data from Kafka in micro-batches.
+
+**Phase 1 -- slow drip (1 msg / 3 s for 30 s).**
+Producer rate < trigger rate -> Spark micro-batches range 1-6 rows.
+
+**Phase 2 -- burst (50 msgs in <1 s).**
+Producer dumps a backlog -> Spark's next 5-second trigger gulps **all 50
+rows in one micro-batch** (`kafka-batch-00000118.json`).
+
+**Phase 3 -- idle (30 s, no producer).**
+Spark's trigger continues to fire (~6 times) but produces no output
+because Kafka has nothing new since the last commit.
+
+| Phase | Producer rate | Spark batch sizes seen |
+|---|---|---|
+| Slow drip | ~0.3 msg/s | 1, 1, 1, 6 |
+| Burst | 50 msgs in 1 burst | **50 (all in one micro-batch)** |
+| Idle | 0 msg/s | 0 (no output written) |
+
+Sustained-rate test (separate run, before the demo): producer pushed
+**2,000 messages in 13 s = 153 msg/s**. Spark drained the backlog in a
+single 2,000-row micro-batch.
+
+This experimentally confirms the two iron rules of Spark Structured
+Streaming:
+
+1. **Trigger interval is fixed** (5 s in this project, configurable via
+   `--trigger-seconds`). Spark wakes up every interval regardless of
+   work.
+2. **Batch size is variable.** Whatever Kafka has accumulated since the
+   last committed offset is what gets pulled.
+
+## 18.4 Form -> Kafka -> Spark integration
+
+In commit `bb10288`, `POST /predict` and `POST /predict/batch` in
+[`src/serve/app.py`](src/serve/app.py) were extended with a
+fire-and-forget Kafka publish. When the FastAPI process is started with
+`PUBLISH_PREDICT_TO_KAFKA=1`, every form submission is *also* published
+to the `reviews` topic, so it flows through Kafka -> Spark Structured
+Streaming -> `/stream/recent` -- in addition to returning the
+synchronous result inline.
+
+Verified live:
+
+```
+BEFORE submit:  Kafka offset=2667
+form submit:    POST /predict body="thsi is not so good"
+sync response:  sentiment=neutral  fraud_proba=0.344  flag=0
+AFTER submit:   Kafka offset=2668  (+1, the form text is now in Kafka)
+~5 s later:     Spark micro-batch 112 picks it up, scores it
+                kafka-batch-00000112.json contains the same review_body,
+                sentiment=neutral, fraud_proba=0.3442
+```
+
+The fraud_proba is identical (`0.344` vs `0.3442`) because both paths
+use the same `models/fraud_pipeline.joblib` -- only the transport
+differs.
+
+Architecturally, this is the fan-out pattern: `/predict` remains a
+low-latency synchronous API for users, while the same call also feeds
+the persistent streaming path for downstream consumers (analytics,
+alerting, archival, etc.).
+
+The producer client is created lazily on first call, with
+`acks=1, linger_ms=0`. `acks=0` was tried first but messages were
+silently dropped under this broker's KRaft config; `acks=1` is the
+correct setting for a one-broker dev setup.
+
+The publish helper is gated by an env var so the patch is safe even when
+Kafka is not running -- `_maybe_get_kafka_producer()` returns `None` if
+the variable is unset, and `_publish_review_to_kafka()` exits early.
+
+## 18.5 Three-window observability stack
+
+For the live demo, three browser-based UIs were brought up so the same
+data can be inspected from three different lenses simultaneously.
+
+| URL | UI | What it shows |
+|---|---|---|
+| `http://localhost:8090` | **Kafka UI** (`provectuslabs/kafka-ui` in Docker) | Brokers, topics, partition stats, **live message viewer** with offset / timestamp / JSON value, consumer groups |
+| `http://localhost:4040` | **Spark UI** | Jobs (one per micro-batch), stages, tasks, DAG visualisation, **Structured Streaming tab** with input rate / process rate / batch duration time-series, executor memory |
+| `http://127.0.0.1:8000` | **FastAPI dashboard** | KPI cards from `/metadata`, threshold-study chart, score-a-review form with LLM explanation, **Live Stream tab** that polls `/stream/recent` |
+
+Producer: `python3 -m scripts.kafka_producer ...` or simply submitting
+the form on the FastAPI dashboard.
+
+This is the closest the project gets to a real "control plane": three
+independent browser tabs, each backed by a different process, watching
+the same review flow through.
+
+### Kafka UI setup (one-time)
+
+`provectuslabs/kafka-ui` runs in Docker and connects to the host's
+Kafka broker. Because Docker Desktop on macOS isolates the container's
+network, the broker's default `advertised.listeners=PLAINTEXT://localhost:9092`
+is unreachable from inside the container (`localhost` resolves to the
+container itself). The fix is a **dual-listener** Kafka config -- add a
+second listener that advertises a Docker-reachable hostname:
+
+```properties
+# /opt/homebrew/etc/kafka/server.properties
+listeners=PLAINTEXT://:9092,CONTROLLER://:9093,DOCKER://:9094
+advertised.listeners=PLAINTEXT://localhost:9092,CONTROLLER://localhost:9093,DOCKER://host.docker.internal:9094
+listener.security.protocol.map=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,DOCKER:PLAINTEXT,SSL:SSL,...
+```
+
+Then run Kafka UI pointed at the DOCKER listener:
+
+```bash
+docker run -d --name kafka-ui --rm -p 8090:8080 \
+  -e KAFKA_CLUSTERS_0_NAME=local \
+  -e KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=host.docker.internal:9094 \
+  provectuslabs/kafka-ui:latest
+```
+
+Existing host clients (Spark consumer, `kafka_producer.py`,
+`publish_one_review.py`, FastAPI's fire-and-forget publish) continue to
+use the original `localhost:9092` listener with no code change.
+
+## 18.6 Bug found, not yet fixed
+
+[`src/stream/score_stream.py:74`](src/stream/score_stream.py#L74) has an
+incorrect Spark API call:
+
+```python
+F.cast(F.col("value"), StringType()).alias("raw_json")  # raises AttributeError
+```
+
+The correct form is `F.col("value").cast(StringType()).alias(...)`.
+The sibling [`src/stream/score_stream_kafka.py:79`](src/stream/score_stream_kafka.py#L79)
+uses the right call and is what `make stream-kafka` invokes -- that is
+the working path verified end-to-end. The broken `score_stream.py` is
+reachable via `make stream` and `make stream-once`.
+
+A one-line fix is straightforward and is logged as a follow-up.
+
+## 18.7 Bugs fixed and code added
+
+### `scripts/kafka_producer.py` -- streaming line read
+
+Previous behaviour: `fh.readlines()` slurped the entire 11 GB
+`reviews.jsonl` into Python memory before sending the first message,
+causing a hang at startup (the producer process accumulated 435 GB of
+virtual memory before being killed).
+
+After the fix (commit `bb10288`):
+
+```python
+def line_stream():
+    while True:
+        with args.source.open() as fh:
+            for line in fh:
+                yield line
+```
+
+Generator yields one line at a time and cycles when exhausted. The
+producer now scales to any `--n-batches` and `--batch-size`, regardless
+of source file size. Verified at 100 msgs/burst, 20 bursts, no sleep =
+**2,000 msgs in 13 s**.
+
+### `scripts/kafka_tap.py` (new)
+
+Live tap on the `reviews` topic. Subscribes via `kafka-python` from the
+latest offset and prints each arriving message in a one-line readable
+format:
+
+```
+[in→kafka offset=2295] product=B09DCSNDT3  rating=5  body="Item came as described! Fast shipping..."
+```
+
+Useful as a monitor while running producer + Spark consumer, without
+needing to start `kafka-console-consumer`.
+
+### `scripts/publish_one_review.py` (new)
+
+One-shot helper that publishes a single user-supplied review to the
+topic (with auto-generated `review_id`, `product_id`, `reviewer_id`).
+Used to push concrete reviews through the pipeline on demand:
+
+```bash
+python3 -m scripts.publish_one_review \
+  --body "Hi, I have used the Chanel perfume and it is awesome" \
+  --rating 5 --product BUSER_CHANEL01 --reviewer R_DEMO_RAJESH
+```
+
+### `scripts/spark_bigdata_demo.py` (new)
+
+The 4-stage Spark aggregation demo described in Section 18.2.
+
+### `src/serve/app.py` -- fire-and-forget Kafka publish
+
+The form-to-Kafka wiring described in Section 18.4. Gated by
+`PUBLISH_PREDICT_TO_KAFKA=1`.
+
+## 18.8 Property snapshot at end of session
+
+### Kafka
+
+| Property | Value |
+|---|---|
+| Broker count | 1 (KRaft mode, `node.id=1`) |
+| Listeners | `PLAINTEXT://:9092, CONTROLLER://:9093, DOCKER://:9094` |
+| Advertised listeners | `localhost:9092` (host clients) + `host.docker.internal:9094` (Docker containers) |
+| Topic | `reviews` |
+| Partitions | 1 |
+| Replication factor | 1 |
+| Log retention | 168 h (7 days) |
+| Segment max | 1 GB |
+| Log dir | `/opt/homebrew/var/lib/kraft-combined-logs/` |
+| Total messages stored at end of session | 2,729 |
+| Avg msg size | 656 bytes |
+| Log file size | 1.75 MB |
+
+### Spark Structured Streaming
+
+| Property | Value |
+|---|---|
+| App name | `amazon-kafka-scorer` |
+| Trigger interval | 5 s |
+| `startingOffsets` | `latest` (only new msgs) |
+| `spark.sql.shuffle.partitions` | 4 (streaming) / 200 (batch) |
+| `spark.driver.memory` | 8 GB |
+| AQE | enabled |
+| Checkpoint dir | `data/streaming_out/_checkpoints_kafka/` |
+
+### Producer (form fire-and-forget)
+
+| Property | Value |
+|---|---|
+| `acks` | 1 |
+| `linger_ms` | 0 |
+| `request_timeout_ms` | 2000 |
+
+### Measured throughput / latency
+
+| Metric | Value |
+|---|---|
+| Kafka publish rate (single producer) | **153 msg/s** sustained |
+| Largest single Spark micro-batch | **2,000 rows** |
+| Form -> Kafka -> Spark -> /stream/recent end-to-end | ~5 s |
+| 20.5 M-row Spark aggregation (4 stages) | **30.8 s** |
+| Heaviest stage: Stage 8 (groupBy reviewer_id) | 45 tasks, 603 MB read, 626 MB shuffle write |
+
+---
+
 # Appendix A -- Code changes
 
 | File | Change | Commit |
@@ -979,11 +1319,22 @@ done
 | `PROJECT_REPORT.md` (new) + `PROJECT_REPORT.pdf` | Build report. | `1e0f013`, `d267887`, then expanded |
 | `README.md` | Refreshed for full-scale run + LLM/agent surfaces. | `9917974` |
 | `src/ingest/import_amazon_real.py` | Streaming adapter: McAuley-Lab schema -> project schema. | `9917974` |
+| `architecture.{png,svg}` + `er_diagram.{png,svg}` | Architecture and ER diagrams committed alongside reports. | `b99d5a5` |
+| `reports/ml/{drift_report.json,threshold_study.csv,fraud_calibration_*}` | Diagnostic outputs from the full-scale run. | `b99d5a5` |
+| `models/thresholds.json` | Updated to `best_f1_threshold=0.80` from the threshold-tuning study. | `b99d5a5` |
+| `scripts/kafka_producer.py` | **Bug fix:** streams JSONL line-by-line via generator instead of `readlines()`-into-RAM (Section 18.7). | `bb10288` |
+| `src/serve/app.py` | **Feature:** optional fire-and-forget Kafka publish on `/predict` and `/predict/batch`, gated by `PUBLISH_PREDICT_TO_KAFKA=1` (Section 18.4). | `bb10288` |
+| `scripts/kafka_tap.py` (new) | Live tap on Kafka topic; prints each arriving message (Section 18.7). | `bb10288` |
+| `scripts/publish_one_review.py` (new) | One-shot CLI helper to publish a review to Kafka (Section 18.7). | `bb10288` |
+| `scripts/spark_bigdata_demo.py` (new) | 20.5 M-row Spark aggregation demo with shuffles + join (Section 18.2). | `bb10288` |
 | `data/raw/reviews.jsonl` | Symlink to the converted 11 GB JSONL (avoids duplicating data). | (not in git -- local) |
+| `/opt/homebrew/etc/kafka/server.properties` | **Broker config:** added `DOCKER://:9094` listener advertised as `host.docker.internal:9094` so Kafka UI in Docker can reach the broker (Section 18.5). | (not in repo -- local broker config) |
 
 # Appendix B -- Commits pushed to `origin/main` (this session)
 
 ```
+bb10288  feat: wire /predict to Kafka and add Spark/Kafka demo helpers
+b99d5a5  docs: add architecture/ER diagrams, ML reports, updated thresholds
 9917974  docs: README reflects full real-data run + LLM/agent surfaces
 d267887  docs: report covers full-feature run (Kafka + diagnostics + agents)
 1e0f013  docs: full real-data run report (PROJECT_REPORT.md + .pdf)
@@ -1014,7 +1365,9 @@ src/serve/templates/index.html
 src/serve/static/{app.js,style.css}
 src/agents/review_auditor.py              ← Ollama tool-calling agent
 src/common/{config,schema,spark,text}.py
-scripts/{feed_stream.py,kafka_producer.py,run_pipeline.sh,build_report.py}
+scripts/{feed_stream.py,kafka_producer.py,kafka_tap.py,
+         publish_one_review.py,spark_bigdata_demo.py,
+         run_pipeline.sh,build_report.py}
 streamlit_app.py                          ← Streamlit demo
 tests/test_pipeline.py
 Makefile / requirements.txt / .gitignore
