@@ -550,6 +550,55 @@ The **dashboard + drift + explanation** pieces are meant for monitoring and tran
 they do not replace rigorous evaluation on real Amazon data, but they make the current run
 easier to interpret than headline numbers alone.
 
+### Model performance on the 4,105,036-row holdout
+
+| Metric | Sentiment | Fraud (t=0.5) | Fraud (t=0.80) |
+|---|---|---|---|
+| Macro-F1 | **0.680** | — | — |
+| Weighted-F1 | **0.841** | — | — |
+| Accuracy | 0.810 | — | — |
+| ROC-AUC | — | **0.845** | **0.845** |
+| Precision | — | 0.147 | 0.292 |
+| Recall | — | 0.721 | 0.457 |
+| F1 | — | 0.244 | **0.356** |
+
+### Threshold sweep — fraud classifier
+
+| Threshold | Precision | Recall | F1 |
+|---|---|---|---|
+| 0.50 | 0.147 | 0.721 | 0.244 |
+| 0.60 | 0.193 | 0.635 | 0.296 |
+| 0.70 | 0.242 | 0.549 | 0.336 |
+| **0.80** (selected) | **0.292** | 0.457 | **0.356** |
+| 0.90 | 0.358 | 0.265 | 0.305 |
+
+The default `0.5` threshold over-fires (precision 14.7%). Tuning to **0.80**
+trades a moderate recall hit for a 2× precision gain and the best F1 in the
+sweep. The selected threshold is persisted to
+[`models/thresholds.json`](models/thresholds.json).
+
+### Probability calibration
+
+Raw fraud probabilities are reasonable rankers but poorly calibrated. Post-hoc
+isotonic calibration cuts Brier 5× and ECE by three orders of magnitude with
+zero ROC-AUC change:
+
+| Method | Brier | ECE | ROC-AUC |
+|---|---|---|---|
+| Raw | 0.143 | 0.302 | 0.846 |
+| Sigmoid (Platt) | 0.030 | 0.002 | 0.846 |
+| **Isotonic** (best) | **0.029** | **0.000146** | 0.846 |
+
+Run `python -m src.train.calibration_report` to regenerate these on the
+current holdout. Results are written to `reports/ml/fraud_calibration_*`.
+
+### Spark performance (20.5M-row aggregation demo)
+
+The 4-stage Spark aggregation demo (`scripts/spark_bigdata_demo.py`) runs the
+full 20.5M-row dataset through `groupBy(reviewer_id)` + `groupBy(product_id)`
++ hash-join in **30.8 s** end-to-end on a single-node `local[*]` setup. Heaviest
+stage: 45 parallel tasks, 603 MB read, **626 MB shuffle write**.
+
 ## Tests
 
 ```bash
@@ -594,6 +643,48 @@ See Fig. 5 of the IEEE report for the full ER diagram with primary/foreign keys.
 | **Total** | end-to-end one pass | **~6 hours** |
 
 Streaming + serving stages are on-demand and run in seconds.
+
+## Limitations
+
+Honest caveats from the IEEE report (Section XI.A):
+
+- **Single-category corpus.** Only Cell Phones & Accessories was used.
+  Category-level features add little signal in this setup; a multi-category
+  corpus would let category features carry real information.
+- **No unhelpful-votes column.** The McAuley-Lab dump exposes only
+  `helpful_votes`. We set `total_votes = helpful_votes`, which makes any
+  helpfulness-ratio feature degenerate, so we don't use one.
+- **Weak fraud labels.** Ground truth labels are not available, so the
+  fraud target comes from rule-based heuristics. Reported metrics are
+  against that proxy and should not be quoted as production fraud accuracy.
+- **Sentiment LogReg did not fully converge.** The `saga` solver hit
+  `max_iter` on 16 M sparse rows. The model still performs well, but
+  weights may not be fully optimal.
+- **No GBT.** Gradient-Boosted Trees were the original choice but did not
+  finish in laptop time on 16 M rows. We use linear models, which scale
+  but may miss complex non-linear patterns.
+
+## Where this would go next
+
+From IEEE report Section XI.B:
+
+- **Wire the tuned threshold into serving.** `models/thresholds.json` holds
+  `best_f1_threshold = 0.80`; FastAPI currently uses the default 0.5.
+- **Wire calibration into serving.** Emit isotonic-calibrated `fraud_proba`
+  from `/predict` so downstream consumers can trust the probability values
+  for thresholding decisions.
+- **Multi-category training.** Concatenate 5-10 category JSONLs so category
+  features stop being constant.
+- **Hand-labeled fraud sample.** Build a small (~1,000-row) human-labeled
+  validation set to ground the AUC against real labels instead of a noisy
+  weak-label proxy.
+- **MLflow Model Registry.** Stage → production promotion, FastAPI loads
+  by stage rather than by file path.
+- **Docker Compose** for Spark + MLflow + Kafka + FastAPI + Ollama so the
+  project deploys on any host with a single command.
+- **Feature store** with real reviewer / product history at serving time
+  instead of neutral defaults — closes the train/serve skew gap on the
+  behavioral features.
 
 ## Build report
 
