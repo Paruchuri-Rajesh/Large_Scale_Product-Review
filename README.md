@@ -1,104 +1,121 @@
-🚨 FraudLens
-Large-Scale Product Review Sentiment & Fraud Detection
+FraudLens: Large-Scale Review Sentiment and Fraud Detection
+Overview
 
+FraudLens is an end-to-end data engineering and machine learning system for analyzing Amazon product reviews at scale. It performs both sentiment classification and fraud detection while supporting real-time scoring through a streaming pipeline.
 
-📌 Overview
+The system is designed to handle tens of millions of reviews using distributed processing and provides predictions through APIs, dashboards, and programmatic interfaces.
 
-FraudLens is an end-to-end big data pipeline that analyzes Amazon product reviews at scale to perform:
+Problem Statement
 
-💬 Sentiment Classification (Positive / Neutral / Negative)
-🕵️ Fraud Detection (Fake / Suspicious Reviews)
-⚡ Real-time Streaming Predictions
-🤖 LLM-based Fraud Explanations
+Online product reviews significantly influence purchasing decisions, but they are often affected by spam, duplicate content, and incentivized reviews. Manual moderation is not scalable at this volume.
 
-The system processes 20M+ reviews using distributed computing and serves results via APIs, dashboards, and AI tools.
+FraudLens addresses two key problems:
 
-🏗️ Architecture
-⚙️ Tech Stack
-Big Data: Apache Spark, Kafka
-Cloud: AWS S3, Glue, Athena
-Machine Learning: scikit-learn, MLflow
-Backend: FastAPI
-Frontend: Streamlit
-LLM: Ollama (Llama 3.2)
-Database: MySQL
-📊 Dataset
-Amazon Reviews 2023 (Cell Phones & Accessories)
-~20.8 Million Reviews (~11GB)
-~20.5 Million Cleaned Records
-Fraud Rate: ~3.57%
-🤖 Models & Performance
+Sentiment classification (positive, neutral, negative)
+Fraud detection (identifying suspicious or manipulated reviews)
+System Architecture
+
+The pipeline is organized into five stages:
+
+Ingestion
+Raw JSON review data stored in AWS S3
+Converted to Parquet using AWS Glue
+Batch Processing (Apache Spark)
+Data cleaning and validation
+Feature engineering (text, reviewer behavior, product aggregates)
+Weak fraud label generation
+Train/test split
+Model Training
+Sentiment model: TF-IDF + Logistic Regression
+Fraud model: TF-IDF + behavioral features + Logistic Regression
+Experiment tracking using MLflow
+Leakage prevention using feature filtering and label noise
+Streaming Pipeline
+Kafka used for real-time ingestion
+Spark Structured Streaming for micro-batch scoring
+Predictions generated every few seconds
+Serving Layer
+FastAPI REST service
+Dashboard for visualization
+MCP server for tool-based access
+LLM-based explanation system
+Dataset
+Source: Amazon Reviews 2023 (Cell Phones & Accessories)
+Size: ~20.8 million reviews (~11 GB)
+Cleaned: ~20.5 million records
+Fraud class distribution: ~3.57%
+Feature Engineering
+
+Features are generated at multiple levels:
+
+Text features
+Review length, word count, punctuation usage
+Reviewer-level features
+Review frequency, rating patterns, verified purchase ratio
+Product-level features
+Review count, average rating, duplicate review detection
+
+Weak fraud labels are created using heuristic rules. To avoid leakage:
+
+Rule-based features are excluded from training
+Controlled noise is introduced into labels
+Model Performance
 Sentiment Model
-TF-IDF + Logistic Regression
-Weighted F1: 0.841
+Algorithm: Logistic Regression with TF-IDF
+Weighted F1 Score: 0.841
 Accuracy: 0.81
 Fraud Detection Model
-TF-IDF + Behavioral Features
 ROC-AUC: 0.845
-Best Threshold: 0.80
+Best threshold: 0.80
 F1 Score: 0.356
 Calibration
-Brier Score: 0.143 → 0.029
-ECE: 0.302 → 0.000146
-⚡ Real-Time Streaming
-⏱️ Latency: ~5 seconds
-🚀 Throughput: ~150 msgs/sec
-🔌 API Endpoints
+Brier Score: reduced from 0.143 to 0.029
+Expected Calibration Error: reduced from 0.302 to 0.000146
+Real-Time Processing
+Streaming framework: Kafka + Spark Structured Streaming
+Processing mode: micro-batches (~5 seconds)
+Throughput: ~150 messages/second
+Supports both synchronous API scoring and asynchronous streaming
+API Endpoints
 Method	Endpoint	Description
-GET	/healthz	Health check
-GET	/metadata	Model info
-POST	/predict	Score single review
-POST	/predict/batch	Batch scoring
-GET	/aggregates/products	Top products
+GET	/healthz	Service health check
+GET	/metadata	Model metadata and metrics
+POST	/predict	Score a single review
+POST	/predict/batch	Score multiple reviews
+GET	/aggregates/products	Product-level aggregates
 GET	/aggregates/fraud-reviewers	Suspicious reviewers
-GET	/stream/recent	Live stream results
-🤖 LLM Features
-Generates fraud explanations using Llama 3.2
-Detects:
-Duplicate text
-Reviewer anomalies
-Rating manipulation
-Includes AI review auditor agent for product risk analysis
-⏱️ Runtime
-Stage	Time
-Ingestion	~3.5 min
-ETL	~24 min
-Sentiment Training	~52 min
-Fraud Training	~3.5 hrs
-Total Pipeline	~6 hours
+GET	/stream/recent	Latest streaming results
+Technology Stack
+Apache Spark (batch + streaming)
+Apache Kafka (messaging)
+AWS S3, Glue, Athena (data storage and ETL)
+scikit-learn (modeling)
+MLflow (experiment tracking)
+FastAPI (serving)
+Streamlit (dashboard)
+MySQL (metadata storage)
+Ollama / Llama 3.2 (LLM explanations)
+Runtime
+Stage	Duration
+Ingestion	~3.5 minutes
+ETL	~24 minutes
+Sentiment training	~52 minutes
+Fraud training	~3.5 hours
+Full pipeline	~6 hours
 
-Runs on a 16GB laptop.
+Runs on a standard 16 GB machine.
 
-📂 Project Structure
-FraudLens/
-│── src/
-│   ├── etl/
-│   ├── models/
-│   ├── stream/
-│   ├── serve/
-│   ├── agents/
-│── data/
-│── tests/
-│── README.md
-🚀 Getting Started
-# Clone repository
-git clone https://github.com/Paruchuri-Rajesh/Large_Scale_Product-Review.git
+Limitations
+Dataset limited to a single product category
+No ground-truth fraud labels (weak supervision used)
+Linear models may not capture complex patterns
+Missing helpful/unhelpful vote features
+Future Work
+Extend to multiple product categories
+Incorporate human-labeled fraud data
+Introduce deep learning models
+Deploy using containerized infrastructure
+Add real-time feature store
+Repository
 
-cd Large_Scale_Product-Review
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run FastAPI server
-uvicorn app:app --reload
-⚠️ Limitations
-Single product category dataset
-No true fraud labels (weak supervision used)
-Linear models only
-Missing helpful vote data
-🔮 Future Work
-Multi-category expansion
-Human-labeled fraud dataset
-Docker deployment
-Real-time feature store
-Advanced ML models
+https://github.com/Paruchuri-Rajesh/Large_Scale_Product-Review
